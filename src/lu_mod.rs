@@ -3,7 +3,7 @@
 use crate::ModContext;
 use assembly_fdb::common::ValueType;
 use assembly_fdb::core::Field;
-use color_eyre::eyre::{self, eyre, WrapErr};
+use color_eyre::eyre::{self, eyre};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -49,18 +49,6 @@ impl Default for Mod {
             fields: vec![],
         }
     }
-}
-
-impl Mod {
-    pub fn set_default(&mut self, key: &str, value: Field) {
-        if self.values.contains_key(key) {
-            return;
-        }
-
-        self.defaults.insert(key.to_string(), value);
-    }
-
-    pub fn get_values(&self) {}
 }
 
 pub fn apply_item_mod(lu_mod: &mut Mod) -> eyre::Result<()> {

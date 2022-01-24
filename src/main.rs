@@ -1,19 +1,16 @@
-#![allow(dead_code, unused_imports)]
 use crate::mod_context::ModContext;
-use assembly_fdb::{common::Latin1String, common::ValueType, core::Field, mem::Database, store};
+use assembly_fdb::{core::Field, mem::Database, store};
 use color_eyre::eyre::{self, eyre, WrapErr};
 use mapr::Mmap;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
-use std::{fmt::Write, fs::File, io::BufWriter, io::Write as _, path::PathBuf, time::Instant};
-use structopt::{clap::ArgGroup, StructOpt};
+use std::{fs::File, io::BufWriter, path::PathBuf, time::Instant};
+use structopt::{StructOpt};
 mod locale;
 mod lu_mod;
 mod manifest;
 mod mod_context;
 mod mods;
-use crate::locale::Localization;
 use crate::lu_mod::*;
 use crate::manifest::Manifest;
 use crate::mods::Mods;
@@ -41,6 +38,7 @@ struct Options {
     )]
     input: PathBuf,
 
+    #[allow(dead_code)]
     #[structopt(
         short = "c",
         long = "copy",
@@ -48,6 +46,7 @@ struct Options {
     )]
     copy_object: Option<u32>,
 
+    #[allow(dead_code)]
     #[structopt(
         short = "d",
         long = "id",
@@ -56,6 +55,7 @@ struct Options {
     )]
     copy_id: String,
 
+    #[allow(dead_code)]
     #[structopt(
         short = "o",
         long = "output",
@@ -403,6 +403,7 @@ where
     }
 }
 
+#[allow(dead_code)]
 fn read_xml<T>(path: &Path) -> eyre::Result<T>
 where
     T: serde::de::DeserializeOwned + serde::Serialize + std::fmt::Debug,

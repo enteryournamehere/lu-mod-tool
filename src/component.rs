@@ -1,5 +1,4 @@
-use color_eyre::eyre::{self, eyre, WrapErr};
-use std::str::FromStr;
+use color_eyre::eyre::{self, eyre};
 
 pub fn component_name_to_id(name: &str) -> eyre::Result<i32> {
     match name {

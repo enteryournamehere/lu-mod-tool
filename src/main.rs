@@ -1,4 +1,3 @@
-use crate::locale::Localization;
 use crate::mod_context::ModContext;
 use assembly_fdb::{core::Field, mem::Database, store};
 use color_eyre::eyre::{self, eyre, WrapErr};
@@ -366,6 +365,21 @@ fn main() -> eyre::Result<()> {
 
     let timer = print_timer(timer);
 
+    print!("Applying SQL mods... ");
+    std::io::stdout().flush()?;
+    for modification in mod_context.mods.values() {
+        if modification.mod_type == "sql" {
+            let sql = modification.values.get("sql").unwrap();
+            // type was checked earlier
+            let mut sql_str = String::from(sql.as_str().unwrap());
+            // remove transactions because they cannot be nested
+            sql_str = sql_str.replace("BEGIN TRANSACTION;", "");
+            sql_str = sql_str.replace("COMMIT;", "");
+            dest_sqlite.execute(sql_str.as_str(), rusqlite::params![])?;
+        }
+    }
+    let timer = print_timer(timer);
+
     print!("Exporting SQLite... ");
     std::io::stdout().flush()?;
     dest_sqlite.execute("COMMIT", rusqlite::params![])?;
@@ -414,13 +428,15 @@ fn apply_mod_file(
     file: &Path,
 ) -> eyre::Result<()> {
     let mods: Vec<Mod> = read_json::<Vec<Mod>>(file)?;
+    let dir = file.parent().unwrap();
     for mut lu_mod in mods {
         println!("    └ {:?}", &lu_mod.id);
+        lu_mod.dir = dir.into();
 
         // #[allow(unused_must_use)]
         let _ = match lu_mod.mod_type.as_str() {
             "item" => apply_item_mod(&mut lu_mod)?,
-            "sql" => apply_sql_mod(&lu_mod)?,
+            "sql" => apply_sql_mod(mod_context, &mut lu_mod)?,
             "environmental" => apply_environmental_mod(&lu_mod)?,
             "mission" => apply_mission_mod(&lu_mod)?,
             "npc" => apply_npc_mod(&lu_mod)?,

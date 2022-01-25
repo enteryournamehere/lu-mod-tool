@@ -6,6 +6,8 @@ use assembly_fdb::core::Field;
 use color_eyre::eyre::{self, eyre};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::Read;
+use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Mod {
@@ -28,6 +30,8 @@ pub struct Mod {
     pub defaults: HashMap<String, Field>,
     #[serde(skip)]
     pub fields: Vec<Field>,
+    #[serde(skip)]
+    pub dir: PathBuf,
 }
 
 impl Default for Mod {
@@ -47,6 +51,7 @@ impl Default for Mod {
             values: HashMap::new(),
             defaults: HashMap::new(),
             fields: vec![],
+            dir: PathBuf::new(),
         }
     }
 }
@@ -55,8 +60,27 @@ pub fn apply_item_mod(lu_mod: &mut Mod) -> eyre::Result<()> {
     Ok(())
 }
 
-pub fn apply_sql_mod(lu_mod: &Mod) -> eyre::Result<()> {
-    Ok(())
+pub fn apply_sql_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
+    if let Some(sql) = &lu_mod.values.get("sql") {
+        if let Some(sql_str) = sql.as_str() {
+            if let Some(path) = sql_str.strip_prefix("INCLUDE:") {
+                // load from path
+                let mut sql_file = std::fs::File::open(lu_mod.dir.join(path))?;
+                let mut sql_str = String::new();
+                sql_file.read_to_string(&mut sql_str)?;
+                lu_mod.values.insert(String::from("sql"), sql_str.into());
+                return Ok(());
+            } else {
+                let sql_value = sql_str.into();
+                lu_mod.values.insert(String::from("sql"), sql_value);
+            }
+            return Ok(());
+        } else {
+            return Err(eyre!("incorrect value type for sql"));
+        }
+    }
+
+    Err(eyre!("sql not set"))
 }
 
 pub fn apply_environmental_mod(lu_mod: &Mod) -> eyre::Result<()> {

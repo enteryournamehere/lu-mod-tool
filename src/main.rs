@@ -1,11 +1,12 @@
+use crate::locale::Localization;
 use crate::mod_context::ModContext;
 use assembly_fdb::{core::Field, mem::Database, store};
 use color_eyre::eyre::{self, eyre, WrapErr};
 use mapr::Mmap;
 use std::collections::HashMap;
 use std::path::Path;
-use std::{fs::File, io::BufWriter, path::PathBuf, time::Instant};
-use structopt::{StructOpt};
+use std::{fmt::Write, fs::File, io::BufWriter, io::Write as _, path::PathBuf, time::Instant};
+use structopt::StructOpt;
 mod locale;
 mod lu_mod;
 mod manifest;
@@ -16,6 +17,7 @@ use crate::manifest::Manifest;
 use crate::mods::Mods;
 mod component;
 use crate::component::{component_name_to_id, component_name_to_table_name};
+use rusqlite::{params_from_iter, Connection};
 
 #[derive(StructOpt)]
 #[structopt(author = "zaop")]
@@ -26,7 +28,6 @@ use crate::component::{component_name_to_id, component_name_to_table_name};
      - Option --copy is not supported\n\
      - Currently only the action \"add\" is supported, not edit or remove\n\
      - Adding locale entries is not supported\n\
-     - SQLite export is not implemented\n\
      - No fancy coloured terminal output :("
 )]
 struct Options {
@@ -75,11 +76,15 @@ fn main() -> eyre::Result<()> {
 
     let configuration = read_or_create_json::<Mods>(&PathBuf::from(&opts.input))?;
 
+    std::env::set_current_dir(opts.input.parent().unwrap())?;
+
     // Step one. Open database.
-    println!("Opening database.");
+    print!("Opening database... ");
+    std::io::stdout().flush()?;
+    let timer = Instant::now();
     // CDCLIENT.FDB
-    let database_source_path = &opts.input.parent().unwrap().join(&configuration.database);
-    let database_destination_path = &opts.input.parent().unwrap().join("../res/cdclient.fdb");
+    let database_source_path = &configuration.database;
+    let database_destination_path = "../res/cdclient.fdb";
     if !database_source_path.is_file() {
         std::fs::copy(database_destination_path, database_source_path)?;
     }
@@ -92,6 +97,8 @@ fn main() -> eyre::Result<()> {
     })?;
     let mmap = unsafe { Mmap::map(&src_file)? };
     let buffer: &[u8] = &mmap;
+
+    let timer = print_timer(timer);
 
     let mut mod_context = ModContext::<'_> {
         root: std::env::current_dir()?,
@@ -109,16 +116,18 @@ fn main() -> eyre::Result<()> {
     }
 
     // LOCALE.XML
-    let locale_source_path = &opts.input.parent().unwrap().join("locale.xml");
-    let locale_destination_path = &opts.input.parent().unwrap().join("../locale/locale.xml");
+    let locale_source_path = Path::new("locale.xml");
+    let locale_destination_path = Path::new("../locale/locale.xml");
     if !locale_source_path.is_file() {
         std::fs::copy(locale_destination_path, locale_source_path)?;
     }
 
     // read source xml into mod_context.Localization
-    // println!("Reading locale.");
+    print!("Reading locale...[disabled] ");
+    // std::io::stdout().flush()?;
     // mod_context.localization = Some(read_xml::<Localization>(locale_source_path)?);
 
+    let timer = print_timer(timer);
     // TODO check version
 
     // TODO update mods.json if changed
@@ -130,7 +139,7 @@ fn main() -> eyre::Result<()> {
     println!("Applying mods.");
     // Find all directories with a manifest.json file.
     let mut mods_dirs = Vec::new();
-    for entry in std::fs::read_dir(&opts.input.parent().unwrap())? {
+    for entry in std::fs::read_dir(".")? {
         let path = entry?.path();
         if path.is_dir() && path.join("manifest.json").is_file() {
             mods_dirs.push(path);
@@ -254,12 +263,20 @@ fn main() -> eyre::Result<()> {
         }
     }
 
-    // Create destination database and merge new rows into it
-    println!("Building output database.");
-    let mut dest_db = store::Database::new();
+    print!("Applied mods in ");
+    let timer = print_timer(timer);
 
+    // Create destination database and merge new rows into it
+    print!("Building output database... ");
+    std::io::stdout().flush()?;
+    let mut dest_fdb = store::Database::new();
+    let sqlite_path = Path::new(&mod_context.configuration.sqlite);
+    let dest_sqlite = Connection::open(&sqlite_path)?;
+    dest_sqlite.execute("BEGIN", rusqlite::params![])?;
     for src_table in mod_context.database.tables()?.iter() {
         let src_table = src_table?;
+        let mut create_query = format!("CREATE TABLE IF NOT EXISTS \"{}\"\n(\n", src_table.name());
+        let mut insert_query = format!("INSERT INTO \"{}\" (", src_table.name());
 
         let to_add = {
             match src_table.name().into_owned().as_str() {
@@ -287,14 +304,39 @@ fn main() -> eyre::Result<()> {
 
         let mut dest_table = store::Table::new(new_bucket_count as usize);
 
+        let mut first = true;
         for src_column in src_table.column_iter() {
+            // sqlite
+            if first {
+                first = false;
+            } else {
+                writeln!(create_query, ",").unwrap();
+                write!(insert_query, ", ").unwrap();
+            }
+            let column_type = src_column.value_type().to_sqlite_type();
+            write!(create_query, "    [{}] {}", src_column.name(), column_type).unwrap();
+            write!(insert_query, "[{}]", src_column.name()).unwrap();
+
+            // fdb
             dest_table.push_column(src_column.name_raw(), src_column.value_type());
         }
+        // sqlite
+        create_query.push_str(");");
+        insert_query.push_str(") VALUES (?1");
+        for i in 2..=src_table.column_count() {
+            write!(insert_query, ", ?{}", i).unwrap();
+        }
+        insert_query.push_str(");");
+        dest_sqlite.execute(&create_query, rusqlite::params![])?;
 
+        let mut insert_statement = dest_sqlite.prepare(&insert_query)?;
         for addable in to_add {
             if addable.is_empty() {
                 continue;
             }
+            // sqlite
+            insert_statement.execute(params_from_iter(addable.iter()))?;
+            // fdb
             let pk = match &addable[0] {
                 Field::Integer(i) => *i as usize,
                 Field::BigInt(i) => *i as usize,
@@ -311,22 +353,35 @@ fn main() -> eyre::Result<()> {
                 for field in src_row.field_iter() {
                     row_buffer.push(Field::from(field));
                 }
+                // sqlite
+                insert_statement.execute(params_from_iter(row_buffer.iter()))?;
+                // fdb
                 dest_table.push_row(pk, &row_buffer[..]);
                 row_buffer.clear();
             }
         }
 
-        dest_db.push_table(src_table.name_raw(), dest_table);
+        dest_fdb.push_table(src_table.name_raw(), dest_table);
     }
 
-    println!("Exporting FDB.");
-    let dest_file = File::create("dest.fdb")?;
+    let timer = print_timer(timer);
+
+    print!("Exporting SQLite... ");
+    std::io::stdout().flush()?;
+    dest_sqlite.execute("COMMIT", rusqlite::params![])?;
+
+    let timer = print_timer(timer);
+
+    print!("Exporting FDB... ");
+    std::io::stdout().flush()?;
+    let fdb_path = Path::new("../res/cdclient.fdb");
+    let dest_file = File::create(fdb_path)?;
     let mut dest_out = BufWriter::new(dest_file);
-    dest_db
+    dest_fdb
         .write(&mut dest_out)
         .wrap_err("Failed to write output database")?;
 
-    // TODO export to sqlite
+    let _ = print_timer(timer);
     // TODO apply sql mods
 
     println!("\nGenerated IDs: {:#?}", lookup);
@@ -411,4 +466,10 @@ where
     let contents = std::fs::read_to_string(&path)?;
     let xml: T = quick_xml::de::from_str(&contents)?;
     Ok(xml)
+}
+
+fn print_timer(start: Instant) -> Instant {
+    let duration = start.elapsed();
+    println!("{}ms", duration.as_millis());
+    Instant::now()
 }

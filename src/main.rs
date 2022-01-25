@@ -1,3 +1,6 @@
+use crate::locale::Localization;
+use crate::locale::Phrase;
+use crate::locale::Translation;
 use crate::mod_context::ModContext;
 use assembly_fdb::{core::Field, mem::Database, store};
 use color_eyre::eyre::{self, eyre, WrapErr};
@@ -26,7 +29,6 @@ use rusqlite::{params_from_iter, Connection};
     This is currently incomplete:\n\
      - Option --copy is not supported\n\
      - Currently only the action \"add\" is supported, not edit or remove\n\
-     - Adding locale entries is not supported\n\
      - No fancy coloured terminal output :("
 )]
 struct Options {
@@ -99,11 +101,24 @@ fn main() -> eyre::Result<()> {
 
     let timer = print_timer(timer);
 
+    // LOCALE.XML
+    let locale_source_path = Path::new("locale.xml");
+    let locale_destination_path = Path::new("../locale/locale.xml");
+    if !locale_source_path.is_file() {
+        std::fs::copy(locale_destination_path, locale_source_path)?;
+    }
+    // read source xml into mod_context.Localization
+    print!("Reading locale... ");
+    std::io::stdout().flush()?;
+    let localization = read_xml::<Localization>(locale_source_path)?;
+
+    let timer = print_timer(timer);
+
     let mut mod_context = ModContext::<'_> {
         root: std::env::current_dir()?,
         configuration,
         database: Database::new(buffer),
-        localization: None,
+        localization,
         ids: Default::default(),
         mods: Default::default(),
         server_sql: Default::default(),
@@ -114,19 +129,6 @@ fn main() -> eyre::Result<()> {
         return Err(eyre!("Input file does not exist"));
     }
 
-    // LOCALE.XML
-    let locale_source_path = Path::new("locale.xml");
-    let locale_destination_path = Path::new("../locale/locale.xml");
-    if !locale_source_path.is_file() {
-        std::fs::copy(locale_destination_path, locale_source_path)?;
-    }
-
-    // read source xml into mod_context.Localization
-    print!("Reading locale...[disabled] ");
-    // std::io::stdout().flush()?;
-    // mod_context.localization = Some(read_xml::<Localization>(locale_source_path)?);
-
-    let timer = print_timer(timer);
     // TODO check version
 
     // TODO update mods.json if changed
@@ -157,7 +159,7 @@ fn main() -> eyre::Result<()> {
 
     // from here on down a lot should be rewritten to be clearer and probably more efficient
 
-    let mut object_mods/*: Vec<Mod>*/ = vec![];
+    let mut object_mods = vec![];
     for (_, modification) in mod_context.mods.iter_mut() {
         if modification.mod_type == "object" {
             object_mods.push(modification);
@@ -176,7 +178,22 @@ fn main() -> eyre::Result<()> {
         let id = ids.pop().unwrap();
         added_object.fields[0] = Field::Integer(id);
         lookup.insert(added_object.id.clone(), id);
-        // println!("{} => {}", added_object.id, id);
+
+        // add locale entries
+        if !&mod_context.localization.phrases.phrase.is_empty() {
+            let mut phrase = Phrase {
+                id: format!("Objects_{}_name", id),
+                translations: vec![],
+            };
+            for (language, text) in &added_object.locale {
+                println!("{} -> {}", language, text);
+                phrase.translations.push(Translation {
+                    locale: language.to_string(),
+                    value: text.to_string(),
+                })
+            }
+            mod_context.localization.phrases.phrase.push(phrase);
+        }
     }
 
     fn find_all_components<'a>(name: &str, mod_context: &'a mut ModContext) -> Vec<&'a mut Mod> {
@@ -399,8 +416,16 @@ fn main() -> eyre::Result<()> {
         .write(&mut dest_out)
         .wrap_err("Failed to write output database")?;
 
+    let timer = print_timer(timer);
+
+    // serialize &mod_context.localization
+    print!("Exporting locale... ");
+    std::io::stdout().flush()?;
+
+    mod_context.localization.locales.count = mod_context.localization.locales.locale.len() as i32;
+    mod_context.localization.phrases.count = mod_context.localization.phrases.phrase.len() as i32;
+    write_xml(&mod_context.localization, Path::new("../locale/locale.xml"))?;
     let _ = print_timer(timer);
-    // TODO apply sql mods
 
     println!("\nGenerated IDs: {:#?}", lookup);
 
@@ -478,7 +503,6 @@ where
     }
 }
 
-#[allow(dead_code)]
 fn read_xml<T>(path: &Path) -> eyre::Result<T>
 where
     T: serde::de::DeserializeOwned + serde::Serialize + std::fmt::Debug,
@@ -486,6 +510,16 @@ where
     let contents = std::fs::read_to_string(&path)?;
     let xml: T = quick_xml::de::from_str(&contents)?;
     Ok(xml)
+}
+
+fn write_xml<T>(content: T, path: &Path) -> eyre::Result<()>
+where
+    T: serde::Serialize + std::fmt::Debug,
+{
+    let mut writer = BufWriter::new(File::create(path)?);
+    let _ = writer.write(b"<?xml version=\"1.0\" encoding=\"UTF-8\" ?>");
+    quick_xml::se::to_writer(&mut writer, &content)?;
+    Ok(())
 }
 
 fn print_timer(start: Instant) -> Instant {

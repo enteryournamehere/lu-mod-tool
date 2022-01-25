@@ -1,34 +1,41 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename = "localization")]
 pub struct Localization {
-    version: f32,
-    locales: Locales,
-    phrases: Phrases,
+    pub version: f32,
+    pub locales: Locales,
+    pub phrases: Phrases,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Locales {
-    count: i32,
-    locale: Vec<String>,
+    pub count: i32,
+    pub locale: Vec<Locale>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Locale {
+    #[serde(rename = "$value", default)]
+    pub value: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Phrases {
-    count: i32,
-    phrase: Vec<Phrase>,
+    pub count: i32,
+    pub phrase: Vec<Phrase>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Phrase {
-    id: String,
+    pub id: String,
     #[serde(rename = "translation")]
-    translations: Vec<Translation>,
+    pub translations: Vec<Translation>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Translation {
-    locale: String,
+    pub locale: String,
     #[serde(rename = "$value", default)]
-    text: String,
+    pub value: String,
 }

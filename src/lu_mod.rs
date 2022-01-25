@@ -1,5 +1,6 @@
 #![allow(unused_variables)]
 
+use crate::component_name_to_table_name;
 use crate::ModContext;
 use assembly_fdb::common::ValueType;
 use assembly_fdb::core::Field;
@@ -60,6 +61,29 @@ pub fn apply_item_mod(lu_mod: &mut Mod) -> eyre::Result<()> {
     Ok(())
 }
 
+pub fn convert_path_specifier(lu_mod: &Mod, contents: &str) -> String {
+    if let Some(asset_path) = contents.strip_prefix("ASSET:") {
+        let mut relative_path_to_mods = "../mods";
+        let mut relative_path_from_mods = asset_path;
+
+        if let Some(physics_path) = asset_path.strip_prefix("PHYSICS:") {
+            relative_path_to_mods = "../../mods";
+            relative_path_from_mods = physics_path;
+        } else if let Some(icon_path) = asset_path.strip_prefix("ICON:") {
+            relative_path_to_mods = "../../../mods";
+            relative_path_from_mods = icon_path;
+        }
+
+        let path = PathBuf::from(relative_path_to_mods)
+            .join(&lu_mod.dir)
+            .join(relative_path_from_mods);
+
+        // use backslashes as path separators
+        return path.to_str().unwrap().to_string().replace("/", "\\");
+    }
+    contents.to_string()
+}
+
 pub fn apply_sql_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
     if let Some(sql) = &lu_mod.values.get("sql") {
         if let Some(sql_str) = sql.as_str() {
@@ -110,10 +134,17 @@ pub fn add_row_in_table(
     lu_mod: &mut Mod,
     table_name: String,
 ) -> eyre::Result<()> {
+    let table_name = component_name_to_table_name(table_name.as_str())?;
     for src_table in mod_context.database.tables()?.iter() {
         let src_table = src_table?;
         if src_table.name() == table_name {
-            let fields = make_row_fields(&src_table, &lu_mod.values)?;
+            let mut fields = make_row_fields(&src_table, &lu_mod.values)?;
+            // run all Field::Texts in fields through convert_path_specifier
+            for field in fields.iter_mut() {
+                if let Field::Text(ref mut text) = field {
+                    *text = convert_path_specifier(lu_mod, text);
+                }
+            }
             lu_mod.fields = fields;
             return Ok(());
         }

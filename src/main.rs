@@ -270,6 +270,10 @@ fn main() -> eyre::Result<()> {
     std::io::stdout().flush()?;
     let mut dest_fdb = store::Database::new();
     let sqlite_path = Path::new(&mod_context.configuration.sqlite);
+    // delete the sqlite file if it exists
+    if sqlite_path.exists() {
+        std::fs::remove_file(sqlite_path)?;
+    }
     let dest_sqlite = Connection::open(&sqlite_path)?;
     dest_sqlite.execute("BEGIN", rusqlite::params![])?;
     for src_table in mod_context.database.tables()?.iter() {

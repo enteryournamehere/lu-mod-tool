@@ -196,39 +196,6 @@ fn main() -> eyre::Result<()> {
         }
     }
 
-    fn find_all_components<'a>(name: &str, mod_context: &'a mut ModContext) -> Vec<&'a mut Mod> {
-        let mut result = vec![];
-
-        for (_, modification) in mod_context.mods.iter_mut() {
-            let table_name = component_name_to_table_name(modification.mod_type.as_str());
-            if let Ok(name2) = table_name {
-                if name2 == name {
-                    result.push(modification);
-                }
-            }
-        }
-
-        result
-    }
-
-    fn find_all_components_non_mutable<'a>(
-        name: &str,
-        mod_context: &'a ModContext,
-    ) -> Vec<&'a Mod> {
-        let mut result = vec![];
-
-        for (_, modification) in mod_context.mods.iter() {
-            let table_name = component_name_to_table_name(modification.mod_type.as_str());
-            if let Ok(name2) = table_name {
-                if name2 == name {
-                    result.push(modification);
-                }
-            }
-        }
-
-        result
-    }
-
     let mut relevant_component_tables: Vec<String> = vec![];
 
     for modification in mod_context.mods.values() {
@@ -246,11 +213,11 @@ fn main() -> eyre::Result<()> {
     }
 
     for component_name in relevant_component_tables {
-        let component_mods = find_all_components_non_mutable(component_name.as_str(), &mod_context);
+        let component_mods = get_mods_for_table(&mod_context, component_name.as_str());
         // println!("{} count = {}", component_name, component_mods.len());
         let component_table = get_table(&mod_context.database, component_name.as_str())?;
         let ids = find_available_ids(&component_table, component_mods.len())?;
-        let mut component_mods = find_all_components(component_name.as_str(), &mut mod_context);
+        let mut component_mods = get_mods_for_table_mut(&mut mod_context, component_name.as_str());
         for (i, added_component) in component_mods.iter_mut().enumerate() {
             if !added_component.fields.is_empty() {
                 added_component.fields[0] = Field::Integer(ids[i]);
@@ -300,18 +267,9 @@ fn main() -> eyre::Result<()> {
 
         let to_add = {
             match src_table.name().into_owned().as_str() {
-                "Objects" => find_all_components_non_mutable("object", &mod_context)
-                    .iter()
-                    .map(|x| x.fields.clone())
-                    .collect::<Vec<Vec<Field>>>(),
+                "Objects" => get_rows_for_insertion(&mod_context, "object"),
                 "ComponentsRegistry" => component_registry.clone(),
-                _ => find_all_components_non_mutable(
-                    src_table.name().into_owned().as_str(),
-                    &mod_context,
-                )
-                .iter()
-                .map(|x| x.fields.clone())
-                .collect::<Vec<Vec<Field>>>(),
+                _ => get_rows_for_insertion(&mod_context, src_table.name().into_owned().as_str()),
             }
         };
 
@@ -478,6 +436,42 @@ fn apply_mod_file(
         mod_context.mods.insert(lu_mod.id.clone(), lu_mod.clone()); // ehhh
     }
     Ok(())
+}
+
+fn get_mods_for_table_mut<'a>(
+    mod_context: &'a mut ModContext,
+    target_table: &str,
+) -> Vec<&'a mut Mod> {
+    mod_context
+        .mods
+        .values_mut()
+        .filter(
+            |modification| match component_name_to_table_name(modification.mod_type.as_str()) {
+                Ok(table_name) => table_name == target_table,
+                Err(_) => false,
+            },
+        )
+        .collect()
+}
+
+fn get_mods_for_table<'a>(mod_context: &'a ModContext, target_table: &str) -> Vec<&'a Mod> {
+    mod_context
+        .mods
+        .values()
+        .filter(
+            |modification| match component_name_to_table_name(modification.mod_type.as_str()) {
+                Ok(table_name) => table_name == target_table,
+                Err(_) => false,
+            },
+        )
+        .collect()
+}
+
+fn get_rows_for_insertion(mod_context: &ModContext, target_table: &str) -> Vec<Vec<Field>> {
+    get_mods_for_table(mod_context, target_table)
+        .iter()
+        .map(|modification| modification.fields.clone())
+        .collect()
 }
 
 fn read_json<T>(path: &Path) -> eyre::Result<T>

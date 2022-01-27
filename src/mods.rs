@@ -6,6 +6,7 @@ pub struct Mods {
     pub version: String,
     pub database: PathBuf,
     pub sqlite: PathBuf,
+    #[serde(default)]
     pub resource_folder: PathBuf,
     pub priorities: Vec<ModPriority>,
 }

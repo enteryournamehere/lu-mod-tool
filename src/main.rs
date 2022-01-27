@@ -159,12 +159,12 @@ fn main() -> eyre::Result<()> {
 
     // from here on down a lot should be rewritten to be clearer and probably more efficient
 
-    let mut object_mods = vec![];
-    for (_, modification) in mod_context.mods.iter_mut() {
-        if modification.mod_type == "object" {
-            object_mods.push(modification);
-        }
-    }
+    let mut object_mods = mod_context
+        .mods
+        .iter_mut()
+        .filter(|m| m.mod_type == "object")
+        .collect::<Vec<&mut Mod>>();
+
     let object_mods_count = object_mods.len();
 
     let mut ids = {
@@ -186,7 +186,6 @@ fn main() -> eyre::Result<()> {
                 translations: vec![],
             };
             for (language, text) in &added_object.locale {
-                println!("{} -> {}", language, text);
                 phrase.translations.push(Translation {
                     locale: language.to_string(),
                     value: text.to_string(),
@@ -198,7 +197,7 @@ fn main() -> eyre::Result<()> {
 
     let mut relevant_component_tables: Vec<String> = vec![];
 
-    for modification in mod_context.mods.values() {
+    for modification in mod_context.mods.iter() {
         match modification.mod_type.as_str() {
             "object" | "sql" => continue, // TODO add npc and stuff ?? unsure if those are used
             _ => {
@@ -229,11 +228,15 @@ fn main() -> eyre::Result<()> {
     let mut component_registry: Vec<Vec<Field>> = vec![];
 
     // Create component registry
-    for modification in mod_context.mods.values() {
+    for modification in mod_context.mods.iter() {
         if modification.mod_type == "object" {
             let linked_components = &modification.components;
             for linked_component_name in linked_components {
-                let linked_component = &mod_context.mods.get(linked_component_name).unwrap(); //bad
+                let linked_component = &mod_context
+                    .mods
+                    .iter()
+                    .find(|m| &m.id == linked_component_name)
+                    .unwrap(); // bad
                 let component_number = component_name_to_id(linked_component.mod_type.as_str())?;
                 // println!("{} has component {}", id, linked_component_name);
                 let component_id = lookup.get(linked_component_name).unwrap(); //bad
@@ -346,7 +349,7 @@ fn main() -> eyre::Result<()> {
 
     print!("Applying SQL mods... ");
     std::io::stdout().flush()?;
-    for modification in mod_context.mods.values() {
+    for modification in mod_context.mods.iter() {
         if modification.mod_type == "sql" {
             let sql = modification.values.get("sql").unwrap();
             // type was checked earlier
@@ -385,7 +388,12 @@ fn main() -> eyre::Result<()> {
     write_xml(&mod_context.localization, Path::new("../locale/locale.xml"))?;
     let _ = print_timer(timer);
 
-    println!("\nGenerated IDs: {:#?}", lookup);
+    println!("\nGenerated IDs:");
+    let mut keys = lookup.keys().collect::<Vec<&String>>();
+    keys.sort();
+    for key in keys {
+        println!(" {:>5} : {}", lookup[key], key);
+    }
 
     let duration = start_time.elapsed();
     println!(
@@ -433,7 +441,7 @@ fn apply_mod_file(
 
         println!("      └ {:?} fields", &lu_mod.fields.len());
 
-        mod_context.mods.insert(lu_mod.id.clone(), lu_mod.clone()); // ehhh
+        mod_context.mods.push(lu_mod.clone()); // ehhh
     }
     Ok(())
 }
@@ -444,7 +452,7 @@ fn get_mods_for_table_mut<'a>(
 ) -> Vec<&'a mut Mod> {
     mod_context
         .mods
-        .values_mut()
+        .iter_mut()
         .filter(
             |modification| match component_name_to_table_name(modification.mod_type.as_str()) {
                 Ok(table_name) => table_name == target_table,
@@ -457,7 +465,7 @@ fn get_mods_for_table_mut<'a>(
 fn get_mods_for_table<'a>(mod_context: &'a ModContext, target_table: &str) -> Vec<&'a Mod> {
     mod_context
         .mods
-        .values()
+        .iter()
         .filter(
             |modification| match component_name_to_table_name(modification.mod_type.as_str()) {
                 Ok(table_name) => table_name == target_table,

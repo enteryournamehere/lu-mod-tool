@@ -57,10 +57,6 @@ impl Default for Mod {
     }
 }
 
-pub fn apply_item_mod(lu_mod: &mut Mod) -> eyre::Result<()> {
-    Ok(())
-}
-
 pub fn convert_path_specifier(lu_mod: &Mod, contents: &str) -> String {
     if let Some(asset_path) = contents.strip_prefix("ASSET:") {
         let mut relative_path_to_mods = "../mods";
@@ -84,7 +80,7 @@ pub fn convert_path_specifier(lu_mod: &Mod, contents: &str) -> String {
     contents.to_string()
 }
 
-pub fn apply_sql_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
+pub fn apply_sql_mod(_mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
     if let Some(sql) = &lu_mod.values.get("sql") {
         if let Some(sql_str) = sql.as_str() {
             if let Some(path) = sql_str.strip_prefix("INCLUDE:") {
@@ -107,15 +103,19 @@ pub fn apply_sql_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result
     Err(eyre!("sql not set"))
 }
 
-pub fn apply_environmental_mod(lu_mod: &Mod) -> eyre::Result<()> {
+pub fn apply_item_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
     Ok(())
 }
 
-pub fn apply_mission_mod(lu_mod: &Mod) -> eyre::Result<()> {
+pub fn apply_environmental_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
     Ok(())
 }
 
-pub fn apply_npc_mod(lu_mod: &Mod) -> eyre::Result<()> {
+pub fn apply_mission_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
+    Ok(())
+}
+
+pub fn apply_npc_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
     Ok(())
 }
 

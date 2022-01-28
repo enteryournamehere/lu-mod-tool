@@ -1,25 +1,23 @@
-use crate::locale::Localization;
-use crate::locale::Phrase;
-use crate::locale::Translation;
-use crate::mod_context::ModContext;
-use assembly_fdb::{core::Field, mem::Database, store};
-use color_eyre::eyre::{self, eyre, WrapErr};
-use mapr::Mmap;
-use std::collections::HashMap;
-use std::path::Path;
-use std::{fmt::Write, fs::File, io::BufWriter, io::Write as _, path::PathBuf, time::Instant};
-use structopt::StructOpt;
+mod component;
 mod locale;
 mod lu_mod;
 mod manifest;
 mod mod_context;
 mod mods;
+use crate::component::{component_name_to_id, component_name_to_table_name};
+use crate::locale::{Localization, Phrase, Translation};
 use crate::lu_mod::*;
 use crate::manifest::Manifest;
+use crate::mod_context::ModContext;
 use crate::mods::Mods;
-mod component;
-use crate::component::{component_name_to_id, component_name_to_table_name};
+use assembly_fdb::{core::Field, mem::Database, store};
+use color_eyre::eyre::{self, eyre, WrapErr};
+use mapr::Mmap;
 use rusqlite::{params_from_iter, Connection};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::{fmt::Write, fs::File, io::BufWriter, io::Write as _, time::Instant};
+use structopt::StructOpt;
 
 #[derive(StructOpt)]
 #[structopt(author = "zaop")]
@@ -76,14 +74,15 @@ fn main() -> eyre::Result<()> {
     println!("Input: {:?}", opts.input);
 
     let configuration = read_or_create_json::<Mods>(&PathBuf::from(&opts.input))?;
+    print!("{:?}", configuration);
 
     std::env::set_current_dir(opts.input.parent().unwrap())?;
 
-    // Step one. Open database.
+    let timer = Instant::now();
+
+    // Load base FDB
     print!("Opening database... ");
     std::io::stdout().flush()?;
-    let timer = Instant::now();
-    // CDCLIENT.FDB
     let database_source_path = &configuration.database;
     let database_destination_path = "../res/cdclient.fdb";
     if !database_source_path.is_file() {
@@ -101,19 +100,20 @@ fn main() -> eyre::Result<()> {
 
     let timer = print_timer(timer);
 
-    // LOCALE.XML
+    // Load base locale
+    print!("Reading locale... ");
+    std::io::stdout().flush()?;
+
     let locale_source_path = Path::new("locale.xml");
     let locale_destination_path = Path::new("../locale/locale.xml");
     if !locale_source_path.is_file() {
         std::fs::copy(locale_destination_path, locale_source_path)?;
     }
-    // read source xml into mod_context.Localization
-    print!("Reading locale... ");
-    std::io::stdout().flush()?;
     let localization = read_xml::<Localization>(locale_source_path)?;
 
     let timer = print_timer(timer);
 
+    // Set up ModContext
     let mut mod_context = ModContext::<'_> {
         root: std::env::current_dir()?,
         configuration,
@@ -153,8 +153,6 @@ fn main() -> eyre::Result<()> {
         apply_manifest(&mut mod_context, manifest_path)?;
     }
 
-    // println!("{:#?}", mod_context.mods);
-
     let mut lookup: HashMap<String, i32> = HashMap::new();
 
     // from here on down a lot should be rewritten to be clearer and probably more efficient
@@ -171,7 +169,6 @@ fn main() -> eyre::Result<()> {
         let objects_table = get_table(&mod_context.database, "Objects")?;
         find_available_ids(&objects_table, object_mods_count)?
     };
-    // println!("{} needed, first {:?}", object_mods_count, ids);
 
     // assign IDs
     for added_object in &mut object_mods {
@@ -199,7 +196,7 @@ fn main() -> eyre::Result<()> {
 
     for modification in mod_context.mods.iter() {
         match modification.mod_type.as_str() {
-            "object" | "sql" => continue, // TODO add npc and stuff ?? unsure if those are used
+            "object" | "sql" | "item" | "npc" | "mission" => continue,
             _ => {
                 if relevant_component_tables.contains(&modification.mod_type) {
                     continue;
@@ -213,7 +210,6 @@ fn main() -> eyre::Result<()> {
 
     for component_name in relevant_component_tables {
         let component_mods = get_mods_for_table(&mod_context, component_name.as_str());
-        // println!("{} count = {}", component_name, component_mods.len());
         let component_table = get_table(&mod_context.database, component_name.as_str())?;
         let ids = find_available_ids(&component_table, component_mods.len())?;
         let mut component_mods = get_mods_for_table_mut(&mut mod_context, component_name.as_str());
@@ -238,7 +234,6 @@ fn main() -> eyre::Result<()> {
                     .find(|m| &m.id == linked_component_name)
                     .unwrap(); // bad
                 let component_number = component_name_to_id(linked_component.mod_type.as_str())?;
-                // println!("{} has component {}", id, linked_component_name);
                 let component_id = lookup.get(linked_component_name).unwrap(); //bad
                 component_registry.push(vec![
                     Field::Integer((modification.fields[0].clone().into_opt_integer()).unwrap()),
@@ -257,6 +252,7 @@ fn main() -> eyre::Result<()> {
     std::io::stdout().flush()?;
     let mut dest_fdb = store::Database::new();
     let sqlite_path = Path::new(&mod_context.configuration.sqlite);
+
     // delete the sqlite file if it exists
     if sqlite_path.exists() {
         std::fs::remove_file(sqlite_path)?;
@@ -379,7 +375,6 @@ fn main() -> eyre::Result<()> {
 
     let timer = print_timer(timer);
 
-    // serialize &mod_context.localization
     print!("Exporting locale... ");
     std::io::stdout().flush()?;
 
@@ -428,13 +423,12 @@ fn apply_mod_file(
         println!("    └ {:?}", &lu_mod.id);
         lu_mod.dir = dir.into();
 
-        // #[allow(unused_must_use)]
         let _ = match lu_mod.mod_type.as_str() {
-            "item" => apply_item_mod(&mut lu_mod)?,
+            "item" => apply_item_mod(mod_context, &mut lu_mod)?,
             "sql" => apply_sql_mod(mod_context, &mut lu_mod)?,
-            "environmental" => apply_environmental_mod(&lu_mod)?,
-            "mission" => apply_mission_mod(&lu_mod)?,
-            "npc" => apply_npc_mod(&lu_mod)?,
+            "environmental" => apply_environmental_mod(mod_context, &mut lu_mod)?,
+            "mission" => apply_mission_mod(mod_context, &mut lu_mod)?,
+            "npc" => apply_npc_mod(mod_context, &mut lu_mod)?,
             "object" => apply_object_mod(mod_context, &mut lu_mod)?,
             _ => add_row(mod_context, &mut lu_mod)?,
         };

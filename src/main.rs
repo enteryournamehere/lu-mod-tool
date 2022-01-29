@@ -4,7 +4,7 @@ mod lu_mod;
 mod manifest;
 mod mod_context;
 mod mods;
-use crate::component::{component_name_to_id, component_name_to_table_name};
+use crate::component::{component_name_to_id, mod_type_to_table_name};
 use crate::locale::{Localization, Phrase, Translation};
 use crate::lu_mod::*;
 use crate::manifest::Manifest;
@@ -122,6 +122,7 @@ fn main() -> eyre::Result<()> {
         ids: Default::default(),
         mods: Default::default(),
         server_sql: Default::default(),
+        lookup: Default::default(),
     };
 
     // verify opts.input exists
@@ -153,14 +154,12 @@ fn main() -> eyre::Result<()> {
         apply_manifest(&mut mod_context, manifest_path)?;
     }
 
-    let mut lookup: HashMap<String, i32> = HashMap::new();
-
     // from here on down a lot should be rewritten to be clearer and probably more efficient
 
     let mut object_mods = mod_context
         .mods
         .iter_mut()
-        .filter(|m| m.mod_type == "object")
+        .filter(|m| m.mod_type == "object" || m.mod_type == "npc" || m.mod_type == "item")
         .collect::<Vec<&mut Mod>>();
 
     let object_mods_count = object_mods.len();
@@ -173,8 +172,8 @@ fn main() -> eyre::Result<()> {
     // assign IDs
     for added_object in &mut object_mods {
         let id = ids.pop().unwrap();
-        added_object.fields[0] = Field::Integer(id);
-        lookup.insert(added_object.id.clone(), id);
+        added_object.fields[0] = OutputValue::Known(Field::Integer(id));
+        mod_context.lookup.insert(added_object.id.clone(), id);
 
         // add locale entries
         if !&mod_context.localization.phrases.phrase.is_empty() {
@@ -196,13 +195,12 @@ fn main() -> eyre::Result<()> {
 
     for modification in mod_context.mods.iter() {
         match modification.mod_type.as_str() {
-            "object" | "sql" | "item" | "npc" | "mission" => continue,
+            "object" | "sql" | "item" | "npc" => continue,
             _ => {
                 if relevant_component_tables.contains(&modification.mod_type) {
                     continue;
                 }
-                let table_name =
-                    component_name_to_table_name(modification.mod_type.as_str())?.clone();
+                let table_name = mod_type_to_table_name(modification.mod_type.as_str())?.clone();
                 relevant_component_tables.push(table_name);
             }
         }
@@ -213,11 +211,15 @@ fn main() -> eyre::Result<()> {
         let component_table = get_table(&mod_context.database, component_name.as_str())?;
         let ids = find_available_ids(&component_table, component_mods.len())?;
         let mut component_mods = get_mods_for_table_mut(&mut mod_context, component_name.as_str());
+        let mut new_for_lookup: HashMap<String, i32> = HashMap::new();
         for (i, added_component) in component_mods.iter_mut().enumerate() {
             if !added_component.fields.is_empty() {
-                added_component.fields[0] = Field::Integer(ids[i]);
+                added_component.fields[0] = OutputValue::Known(Field::Integer(ids[i]));
             }
-            lookup.insert(added_component.id.clone(), ids[i]);
+            new_for_lookup.insert(added_component.id.clone(), ids[i]);
+        }
+        for (id_string, id_int) in new_for_lookup {
+            mod_context.lookup.insert(id_string, id_int);
         }
     }
 
@@ -225,22 +227,31 @@ fn main() -> eyre::Result<()> {
 
     // Create component registry
     for modification in mod_context.mods.iter() {
-        if modification.mod_type == "object" {
-            let linked_components = &modification.components;
-            for linked_component_name in linked_components {
-                let linked_component = &mod_context
-                    .mods
-                    .iter()
-                    .find(|m| &m.id == linked_component_name)
-                    .unwrap(); // bad
-                let component_number = component_name_to_id(linked_component.mod_type.as_str())?;
-                let component_id = lookup.get(linked_component_name).unwrap(); //bad
-                component_registry.push(vec![
-                    Field::Integer((modification.fields[0].clone().into_opt_integer()).unwrap()),
-                    Field::Integer(component_number),
-                    Field::Integer(*component_id),
-                ]);
+        match modification.mod_type.as_str() {
+            // these go into the objects table
+            "object" | "item" | "npc" => {
+                let linked_components = &modification.components;
+                for linked_component_name in linked_components {
+                    let linked_component = &mod_context
+                        .mods
+                        .iter()
+                        .find(|m| &m.id == linked_component_name)
+                        .unwrap(); // bad
+                    let component_number =
+                        component_name_to_id(linked_component.mod_type.as_str())?;
+                    let component_id = mod_context.lookup.get(linked_component_name).unwrap(); //bad
+                    let obj_id = match modification.fields[0] {
+                        OutputValue::Known(Field::Integer(id)) => id,
+                        _ => panic!("Object ID not an integer"),
+                    };
+                    component_registry.push(vec![
+                        Field::Integer(obj_id),
+                        Field::Integer(component_number),
+                        Field::Integer(*component_id),
+                    ]);
+                }
             }
+            _ => {}
         }
     }
 
@@ -266,7 +277,7 @@ fn main() -> eyre::Result<()> {
 
         let to_add = {
             match src_table.name().into_owned().as_str() {
-                "Objects" => get_rows_for_insertion(&mod_context, "object"),
+                "Objects" => get_rows_for_insertion(&mod_context, "Objects"),
                 "ComponentsRegistry" => component_registry.clone(),
                 _ => get_rows_for_insertion(&mod_context, src_table.name().into_owned().as_str()),
             }
@@ -384,10 +395,10 @@ fn main() -> eyre::Result<()> {
     let _ = print_timer(timer);
 
     println!("\nGenerated IDs:");
-    let mut keys = lookup.keys().collect::<Vec<&String>>();
+    let mut keys = mod_context.lookup.keys().collect::<Vec<&String>>();
     keys.sort();
     for key in keys {
-        println!(" {:>5} : {}", lookup[key], key);
+        println!(" {:>5} : {}", mod_context.lookup[key], key);
     }
 
     let duration = start_time.elapsed();
@@ -422,6 +433,7 @@ fn apply_mod_file(
     for mut lu_mod in mods {
         println!("    └ {:?}", &lu_mod.id);
         lu_mod.dir = dir.into();
+        lu_mod.init_output_values();
 
         let _ = match lu_mod.mod_type.as_str() {
             "item" => apply_item_mod(mod_context, &mut lu_mod)?,
@@ -430,7 +442,7 @@ fn apply_mod_file(
             "mission" => apply_mission_mod(mod_context, &mut lu_mod)?,
             "npc" => apply_npc_mod(mod_context, &mut lu_mod)?,
             "object" => apply_object_mod(mod_context, &mut lu_mod)?,
-            _ => add_row(mod_context, &mut lu_mod)?,
+            _ => apply_component_mod(mod_context, &mut lu_mod)?,
         };
 
         println!("      └ {:?} fields", &lu_mod.fields.len());
@@ -448,7 +460,7 @@ fn get_mods_for_table_mut<'a>(
         .mods
         .iter_mut()
         .filter(
-            |modification| match component_name_to_table_name(modification.mod_type.as_str()) {
+            |modification| match mod_type_to_table_name(modification.mod_type.as_str()) {
                 Ok(table_name) => table_name == target_table,
                 Err(_) => false,
             },
@@ -461,7 +473,7 @@ fn get_mods_for_table<'a>(mod_context: &'a ModContext, target_table: &str) -> Ve
         .mods
         .iter()
         .filter(
-            |modification| match component_name_to_table_name(modification.mod_type.as_str()) {
+            |modification| match mod_type_to_table_name(modification.mod_type.as_str()) {
                 Ok(table_name) => table_name == target_table,
                 Err(_) => false,
             },
@@ -473,6 +485,23 @@ fn get_rows_for_insertion(mod_context: &ModContext, target_table: &str) -> Vec<V
     get_mods_for_table(mod_context, target_table)
         .iter()
         .map(|modification| modification.fields.clone())
+        .map(|fields| {
+            fields
+                .iter()
+                .map(move |field| match field {
+                    OutputValue::Known(value) => value.clone(),
+                    OutputValue::AwaitingId(id_string) => {
+                        let id = mod_context.lookup[id_string];
+                        assembly_fdb::core::Field::Integer(id)
+                    }
+                    OutputValue::FromJson(_) => panic!(),
+                    OutputValue::GenerateId => {
+                        // TODO :)
+                        assembly_fdb::core::Field::Integer(2)
+                    }
+                })
+                .collect()
+        })
         .collect()
 }
 

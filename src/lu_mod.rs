@@ -1,11 +1,12 @@
 #![allow(unused_variables)]
 
-use crate::component_name_to_table_name;
+use crate::mod_type_to_table_name;
 use crate::ModContext;
 use assembly_fdb::common::ValueType;
 use assembly_fdb::core::Field;
 use color_eyre::eyre::{self, eyre};
 use serde::{Deserialize, Serialize};
+use serde_json::{to_value as to_json_value, Value as JsonValue};
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::PathBuf;
@@ -23,16 +24,88 @@ pub struct Mod {
     pub table: Option<String>,
     // items: Option<Vec<JsonValue>>,
     // skills: Option<Vec<JsonValue>>,
-    // tasks: Option<Vec<MissionModTask>>,
-    // mission_offers: Option<Vec<MissionOffer>>, // json "missions"
+    #[serde(default)]
+    tasks: Vec<MissionTask>,
+    #[serde(default)]
+    missions: Vec<MissionOffer>,
     pub locale: HashMap<String, String>,
     pub values: HashMap<String, serde_json::Value>,
+    #[serde(default, skip)]
+    pub output_values: HashMap<String, OutputValue>,
     #[serde(skip)]
     pub defaults: HashMap<String, Field>,
     #[serde(skip)]
-    pub fields: Vec<Field>,
+    pub fields: Vec<OutputValue>,
     #[serde(skip)]
     pub dir: PathBuf,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MissionOffer {
+    pub mission: String,
+    pub accept: bool,
+    pub offer: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MissionTask {
+    #[serde(rename = "type")]
+    pub task_type: String,
+    pub target: JsonValue,
+    pub count: i32,
+    pub group: Vec<JsonValue>,
+    #[serde(rename = "location")]
+    pub target_group_string: Option<String>,
+    pub parameters: Option<String>,
+    pub icon: String,
+    #[serde(rename = "small-icon")]
+    pub small_icon: String,
+    pub locale: HashMap<String, String>,
+}
+
+impl Mod {
+    fn set_default<T>(&mut self, key: &str, value: T) -> eyre::Result<()>
+    where
+        T: serde::Serialize,
+    {
+        if self.values.get(key).is_none() {
+            let value = to_json_value(value)?;
+            self.output_values
+                .insert(key.to_string(), OutputValue::FromJson(value));
+        }
+        Ok(())
+    }
+
+    fn set_value<T>(&mut self, key: &str, value: T) -> eyre::Result<()>
+    where
+        T: serde::Serialize,
+    {
+        let value = to_json_value(value)?;
+        self.output_values
+            .insert(key.to_string(), OutputValue::FromJson(value));
+        Ok(())
+    }
+
+    fn set_to_be_generated(&mut self, key: &str) -> eyre::Result<()> {
+        self.output_values
+            .insert(key.to_string(), OutputValue::GenerateId);
+        Ok(())
+    }
+
+    fn set_awaiting_id(&mut self, key: &str, id_string: &str) -> eyre::Result<()> {
+        self.output_values.insert(
+            key.to_string(),
+            OutputValue::AwaitingId(id_string.to_string()),
+        );
+        Ok(())
+    }
+
+    pub fn init_output_values(&mut self) {
+        for (key, value) in self.values.iter() {
+            self.output_values
+                .insert(key.to_string(), OutputValue::FromJson(value.clone()));
+        }
+    }
 }
 
 impl Default for Mod {
@@ -46,15 +119,24 @@ impl Default for Mod {
             table: None,
             // items: None,
             // skills: None,
-            // tasks: None,
-            // mission_offers: None,
+            tasks: vec![],
+            missions: vec![],
             locale: HashMap::new(),
             values: HashMap::new(),
+            output_values: HashMap::new(),
             defaults: HashMap::new(),
             fields: vec![],
             dir: PathBuf::new(),
         }
     }
+}
+
+#[derive(Debug, Clone)]
+pub enum OutputValue {
+    Known(Field),
+    FromJson(JsonValue),
+    AwaitingId(String),
+    GenerateId,
 }
 
 pub fn convert_path_specifier(lu_mod: &Mod, contents: &str) -> String {
@@ -103,7 +185,24 @@ pub fn apply_sql_mod(_mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Resul
     Err(eyre!("sql not set"))
 }
 
-pub fn apply_item_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
+pub fn apply_item_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
+    lu_mod.set_default("nametag", false)?;
+    lu_mod.set_default("localize", true)?;
+    lu_mod.set_default("locStatus", 2)?;
+    lu_mod.set_default("offsetGroupID", 78)?;
+    lu_mod.set_default("itemInfo", 0)?;
+    lu_mod.set_default("fade", true)?;
+    lu_mod.set_default("fadeInTime", 1)?;
+    lu_mod.set_default("shader_id", 23)?;
+    lu_mod.set_default("audioEquipMetaEventSet", "Weapon_Hammer_Generic")?;
+    lu_mod.set_value("type", "Loot")?;
+
+    add_component(mod_context, "ItemComponent", lu_mod)?;
+    add_component(mod_context, "RenderComponent", lu_mod)?;
+    // to-do skill comp
+
+    apply_object_mod(mod_context, lu_mod)?;
+
     Ok(())
 }
 
@@ -111,22 +210,159 @@ pub fn apply_environmental_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> ey
     Ok(())
 }
 
-pub fn apply_mission_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
+pub fn apply_mission_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
+    lu_mod.set_default("locStatus", 2)?;
+    lu_mod.set_default("UIPrereqID", JsonValue::Null)?;
+    lu_mod.set_default("localize", true)?;
+    lu_mod.set_default("isMission", true)?;
+    lu_mod.set_default("isChoiceReward", false)?;
+    lu_mod.set_default("missionIconID", JsonValue::Null)?;
+    lu_mod.set_default("time_limit", JsonValue::Null)?;
+    lu_mod.set_default("reward_item1", -1)?;
+    lu_mod.set_default("reward_item2", -1)?;
+    lu_mod.set_default("reward_item3", -1)?;
+    lu_mod.set_default("reward_item4", -1)?;
+    lu_mod.set_default("reward_item1_repeatable", -1)?;
+    lu_mod.set_default("reward_item2_repeatable", -1)?;
+    lu_mod.set_default("reward_item3_repeatable", -1)?;
+    lu_mod.set_default("reward_item4_repeatable", -1)?;
+    lu_mod.set_default("reward_emote", -1)?;
+    lu_mod.set_default("reward_emote2", -1)?;
+    lu_mod.set_default("reward_emote3", -1)?;
+    lu_mod.set_default("reward_emote4", -1)?;
+    lu_mod.set_default("reward_maxwallet", 0)?;
+    lu_mod.set_default("reward_reputation", 0)?;
+    lu_mod.set_default("reward_currency_repeatable", 0)?;
+
+    add_row_in_table(mod_context, lu_mod, "Missions".to_string())?;
+
+    for (index, task) in lu_mod.tasks.iter().enumerate() {
+        let mut task_mod = Mod {
+            id: lu_mod.id.clone() + ":tasks:" + index.to_string().as_str(),
+            mod_type: "MissionTasks".to_string(),
+            ..lu_mod.clone()
+        };
+        task_mod.set_value("taskType", 0)?; // TODO: read & convert
+        task_mod.set_value("target", task.target.clone())?;
+        task_mod.set_value("targetValue", task.count)?;
+        task_mod.set_value("id", lu_mod.id.clone())?; // will be converted
+        task_mod.set_to_be_generated("uid")?;
+        if let Some(target_group_string) = &task.target_group_string {
+            task_mod.set_value("targetGroup", target_group_string.clone())?;
+        } else {
+            let values = &task.group;
+            // join with commas
+            let group_string = values
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<String>>()
+                .join(",");
+            task_mod.set_value("targetGroup", group_string)?;
+        }
+
+        add_row_in_table(mod_context, &mut task_mod, "MissionTasks".to_string())?;
+        mod_context.mods.push(task_mod);
+    }
+
     Ok(())
 }
 
-pub fn apply_npc_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
+pub fn apply_npc_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
+    lu_mod.set_default("render_asset", "animations\\\\minifig\\\\mf_ambient.kfm")?;
+    lu_mod.set_default("animationGroupIDs", "93")?;
+    lu_mod.set_default("shader_id", 14)?;
+    lu_mod.set_default("static", 1)?;
+    lu_mod.set_default("jump", 0)?;
+    lu_mod.set_default("doublejump", 0)?;
+    lu_mod.set_default("speed", 5)?;
+    lu_mod.set_default("rotSpeed", 360)?;
+    lu_mod.set_default("playerHeight", 4.4)?;
+    lu_mod.set_default("playerRadius", 1)?;
+    lu_mod.set_default("pcShapeType", 2)?;
+    lu_mod.set_default("collisionGroup", 3)?;
+    lu_mod.set_default("airSpeed", 5)?;
+    lu_mod.set_default("jumpAirSpeed", 25)?;
+    lu_mod.set_default("interactionDistance", JsonValue::Null)?;
+
+    lu_mod.set_default("chatBubbleOffset", JsonValue::Null)?;
+    lu_mod.set_default("fade", true)?;
+    lu_mod.set_default("fadeInTime", 1)?;
+    lu_mod.set_default("billboardHeight", JsonValue::Null)?;
+    lu_mod.set_default("AudioMetaEventSet", "Emotes_Non_Player")?;
+    lu_mod.set_default("usedropshadow", false)?;
+    lu_mod.set_default("preloadAnimations", false)?;
+    lu_mod.set_default("ignoreCameraCollision", false)?;
+    lu_mod.set_default("gradualSnap", false)?;
+    lu_mod.set_default("staticBillboard", false)?;
+    lu_mod.set_default("attachIndicatorsToNode", false)?;
+
+    lu_mod.set_default("npcTemplateID", 14)?;
+    lu_mod.set_default("nametag", true)?;
+    lu_mod.set_default("placeable", true)?;
+    lu_mod.set_default("localize", true)?;
+    lu_mod.set_default("locStatus", 2)?;
+
+    lu_mod.set_value("type", "UserGeneratedNPCs")?;
+
+    add_component(mod_context, "SimplePhysicsComponent", lu_mod)?;
+    add_component(mod_context, "RenderComponent", lu_mod)?;
+    add_component(mod_context, "MinifigComponent", lu_mod)?;
+
+    // to-do items
+    if !lu_mod.missions.is_empty() {
+        let mut one_of_the_ids = String::new();
+        for (index, mission) in lu_mod.missions.iter().enumerate() {
+            let component_id =
+                lu_mod.id.clone() + ":MissionNPCComponent:" + index.to_string().as_str();
+            let mut mission_npc_component = Mod {
+                id: component_id.clone(),
+                mod_type: "MissionNPCComponent".to_string(),
+                ..lu_mod.clone()
+            };
+            one_of_the_ids = component_id;
+            mission_npc_component.set_awaiting_id("id", &lu_mod.id)?;
+            mission_npc_component.set_value("missionID", mission.mission.clone())?;
+            mission_npc_component.set_value("offersMission", mission.offer)?;
+            mission_npc_component.set_value("acceptsMission", mission.accept)?;
+
+            add_row_in_table(
+                mod_context,
+                &mut mission_npc_component,
+                "MissionNPCComponent".to_string(),
+            )?;
+            mod_context.mods.push(mission_npc_component);
+        }
+        lu_mod.components.push(one_of_the_ids);
+    }
+
+    apply_object_mod(mod_context, lu_mod)?;
+
     Ok(())
 }
 
 pub fn apply_object_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
-    // TODO items and skills and stuff
-
     add_row_in_table(mod_context, lu_mod, String::from("Objects"))
 }
 
-pub fn add_row(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
+pub fn apply_component_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
     add_row_in_table(mod_context, lu_mod, lu_mod.mod_type.clone()) //eh
+}
+
+pub fn add_component(
+    mod_context: &mut ModContext,
+    component_type: &str,
+    base: &mut Mod,
+) -> eyre::Result<Mod> {
+    let id_str = format!("{}:{}", base.id, component_type);
+    base.components.push(id_str.clone());
+    let mut output = Mod {
+        id: id_str,
+        mod_type: component_type.to_string(),
+        ..base.clone()
+    };
+    apply_component_mod(mod_context, &mut output)?;
+    mod_context.mods.push(output.clone());
+    Ok(output)
 }
 
 pub fn add_row_in_table(
@@ -134,14 +370,14 @@ pub fn add_row_in_table(
     lu_mod: &mut Mod,
     table_name: String,
 ) -> eyre::Result<()> {
-    let table_name = component_name_to_table_name(table_name.as_str())?;
+    let table_name = mod_type_to_table_name(table_name.as_str())?;
     for src_table in mod_context.database.tables()?.iter() {
         let src_table = src_table?;
         if src_table.name() == table_name {
-            let mut fields = make_row_fields(&src_table, &lu_mod.values)?;
+            let mut fields = make_row_fields(&src_table, &lu_mod.output_values)?;
             // run all Field::Texts in fields through convert_path_specifier
             for field in fields.iter_mut() {
-                if let Field::Text(ref mut text) = field {
+                if let OutputValue::Known(Field::Text(ref mut text)) = field {
                     *text = convert_path_specifier(lu_mod, text);
                 }
             }
@@ -154,26 +390,55 @@ pub fn add_row_in_table(
 
 pub fn make_row_fields(
     table: &assembly_fdb::mem::Table,
-    values: &HashMap<String, serde_json::Value>,
-) -> eyre::Result<Vec<Field>> {
+    values: &HashMap<String, OutputValue>,
+) -> eyre::Result<Vec<OutputValue>> {
     let mut fields = Vec::with_capacity(table.column_count());
     for column in table.column_iter() {
-        if values.contains_key(&column.name().to_string()) {
+        let fieldy = if values.contains_key(&column.name().to_string()) {
             let value_type = column.value_type();
             let value = values.get(&column.name().to_string()).unwrap();
-            let field = match value_type {
-                ValueType::Boolean => Field::Boolean(value.as_bool().unwrap()),
-                ValueType::Integer => Field::Integer(value.as_i64().unwrap() as i32),
-                ValueType::BigInt => Field::BigInt(value.as_i64().unwrap()),
-                ValueType::Float => Field::Float(value.as_f64().unwrap() as f32),
-                ValueType::Text => Field::Text(value.as_str().unwrap().to_string()),
-                ValueType::VarChar => Field::Text(value.as_str().unwrap().to_string()),
-                ValueType::Nothing => Field::Nothing,
-            };
-            fields.push(field);
+
+            match value {
+                OutputValue::FromJson(json_value) => {
+                    if json_value == &JsonValue::Null {
+                        OutputValue::Known(Field::Nothing)
+                    } else {
+                        let field = match value_type {
+                            ValueType::Boolean => {
+                                OutputValue::Known(Field::Boolean(json_value.as_bool().unwrap()))
+                            }
+                            ValueType::Integer => {
+                                if let Some(as_i64) = json_value.as_i64() {
+                                    OutputValue::Known(Field::Integer(as_i64 as i32))
+                                } else {
+                                    OutputValue::AwaitingId(
+                                        json_value.as_str().unwrap().to_string(),
+                                    )
+                                }
+                            }
+                            ValueType::BigInt => {
+                                OutputValue::Known(Field::BigInt(json_value.as_i64().unwrap()))
+                            }
+                            ValueType::Float => OutputValue::Known(Field::Float(
+                                json_value.as_f64().unwrap() as f32,
+                            )),
+                            ValueType::Text => OutputValue::Known(Field::Text(
+                                json_value.as_str().unwrap().to_string(),
+                            )),
+                            ValueType::VarChar => OutputValue::Known(Field::Text(
+                                json_value.as_str().unwrap().to_string(),
+                            )),
+                            ValueType::Nothing => OutputValue::Known(Field::Nothing),
+                        };
+                        field
+                    }
+                }
+                _ => value.clone(), // ??
+            }
         } else {
-            fields.push(assembly_fdb::core::Field::Nothing);
-        }
+            OutputValue::Known(Field::Nothing)
+        };
+        fields.push(fieldy);
     }
 
     Ok(fields)

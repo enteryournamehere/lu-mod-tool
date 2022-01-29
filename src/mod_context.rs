@@ -13,4 +13,5 @@ pub struct ModContext<'a> {
     pub ids: HashMap<String, u32>,
     pub mods: Vec<Mod>,
     pub server_sql: Vec<String>,
+    pub lookup: HashMap<String, i32>,
 }

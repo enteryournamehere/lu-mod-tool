@@ -5,7 +5,7 @@ mod manifest;
 mod mod_context;
 mod mods;
 use crate::component::{component_name_to_id, mod_type_to_table_name};
-use crate::locale::{Localization, Phrase, Translation};
+use crate::locale::Localization;
 use crate::lu_mod::*;
 use crate::manifest::Manifest;
 use crate::mod_context::ModContext;
@@ -154,72 +154,60 @@ fn main() -> eyre::Result<()> {
         apply_manifest(&mut mod_context, manifest_path)?;
     }
 
-    // from here on down a lot should be rewritten to be clearer and probably more efficient
+    // Count number of IDs that should be generated for each table
+    let mut new_ids_needed: HashMap<String, usize> = HashMap::new();
 
-    let mut object_mods = mod_context
-        .mods
-        .iter_mut()
-        .filter(|m| m.mod_type == "object" || m.mod_type == "npc" || m.mod_type == "item")
-        .collect::<Vec<&mut Mod>>();
-
-    let object_mods_count = object_mods.len();
-
-    let mut ids = {
-        let objects_table = get_table(&mod_context.database, "Objects")?;
-        find_available_ids(&objects_table, object_mods_count)?
-    };
-
-    // assign IDs
-    for added_object in &mut object_mods {
-        let id = ids.pop().unwrap();
-        added_object.fields[0] = OutputValue::Known(Field::Integer(id));
-        mod_context.lookup.insert(added_object.id.clone(), id);
-
-        // add locale entries
-        if !&mod_context.localization.phrases.phrase.is_empty() {
-            let mut phrase = Phrase {
-                id: format!("Objects_{}_name", id),
-                translations: vec![],
-            };
-            for (language, text) in &added_object.locale {
-                phrase.translations.push(Translation {
-                    locale: language.to_string(),
-                    value: text.to_string(),
-                })
-            }
-            mod_context.localization.phrases.phrase.push(phrase);
+    for lu_mod in &mod_context.mods {
+        if lu_mod
+            .fields
+            .iter()
+            .any(|m| matches!(m, OutputValue::GenerateId))
+        {
+            // increment value in new_ids_needed if it exists, otherwise initialize it
+            new_ids_needed
+                .entry(lu_mod.get_target_table_name())
+                .and_modify(|v| *v += 1)
+                .or_insert(1);
         }
     }
 
-    let mut relevant_component_tables: Vec<String> = vec![];
+    // Generate IDs
+    let mut available_ids: HashMap<String, Vec<i32>> = new_ids_needed
+        .iter()
+        .map(|(table_name, count)| {
+            let table = get_table(&mod_context.database, table_name).unwrap();
+            let ids = find_available_ids(&table, *count).unwrap();
+            (table_name.clone(), ids)
+        })
+        .collect();
 
-    for modification in mod_context.mods.iter() {
-        match modification.mod_type.as_str() {
-            "object" | "sql" | "item" | "npc" => continue,
-            _ => {
-                if relevant_component_tables.contains(&modification.mod_type) {
-                    continue;
+    // Assign generated IDs where requested
+    for lu_mod in &mut mod_context.mods {
+        let table_name = lu_mod.get_target_table_name().clone();
+
+        for field in lu_mod.fields.iter_mut() {
+            if let OutputValue::GenerateId = field {
+                if let Some(ids) = available_ids.get_mut(&table_name) {
+                    let id = ids.pop().unwrap();
+                    *field = OutputValue::Known(Field::Integer(id));
+                    mod_context.lookup.insert(lu_mod.id.clone(), id);
+                } else {
+                    return Err(eyre!("No available ids for table {}", table_name));
                 }
-                let table_name = mod_type_to_table_name(modification.mod_type.as_str())?.clone();
-                relevant_component_tables.push(table_name);
             }
         }
     }
 
-    for component_name in relevant_component_tables {
-        let component_mods = get_mods_for_table(&mod_context, component_name.as_str());
-        let component_table = get_table(&mod_context.database, component_name.as_str())?;
-        let ids = find_available_ids(&component_table, component_mods.len())?;
-        let mut component_mods = get_mods_for_table_mut(&mut mod_context, component_name.as_str());
-        let mut new_for_lookup: HashMap<String, i32> = HashMap::new();
-        for (i, added_component) in component_mods.iter_mut().enumerate() {
-            if !added_component.fields.is_empty() {
-                added_component.fields[0] = OutputValue::Known(Field::Integer(ids[i]));
+    // Fill in AwaitingIDs
+    for lu_mod in &mut mod_context.mods {
+        for field in lu_mod.fields.iter_mut() {
+            if let OutputValue::AwaitingId(id) = field {
+                if let Some(id) = mod_context.lookup.get(id) {
+                    *field = OutputValue::Known(Field::Integer(*id));
+                } else {
+                    return Err(eyre!("No id for {}", id));
+                }
             }
-            new_for_lookup.insert(added_component.id.clone(), ids[i]);
-        }
-        for (id_string, id_int) in new_for_lookup {
-            mod_context.lookup.insert(id_string, id_int);
         }
     }
 
@@ -452,32 +440,11 @@ fn apply_mod_file(
     Ok(())
 }
 
-fn get_mods_for_table_mut<'a>(
-    mod_context: &'a mut ModContext,
-    target_table: &str,
-) -> Vec<&'a mut Mod> {
-    mod_context
-        .mods
-        .iter_mut()
-        .filter(
-            |modification| match mod_type_to_table_name(modification.mod_type.as_str()) {
-                Ok(table_name) => table_name == target_table,
-                Err(_) => false,
-            },
-        )
-        .collect()
-}
-
 fn get_mods_for_table<'a>(mod_context: &'a ModContext, target_table: &str) -> Vec<&'a Mod> {
     mod_context
         .mods
         .iter()
-        .filter(
-            |modification| match mod_type_to_table_name(modification.mod_type.as_str()) {
-                Ok(table_name) => table_name == target_table,
-                Err(_) => false,
-            },
-        )
+        .filter(|modification| modification.get_target_table_name() == target_table)
         .collect()
 }
 
@@ -490,15 +457,7 @@ fn get_rows_for_insertion(mod_context: &ModContext, target_table: &str) -> Vec<V
                 .iter()
                 .map(move |field| match field {
                     OutputValue::Known(value) => value.clone(),
-                    OutputValue::AwaitingId(id_string) => {
-                        let id = mod_context.lookup[id_string];
-                        assembly_fdb::core::Field::Integer(id)
-                    }
-                    OutputValue::FromJson(_) => panic!(),
-                    OutputValue::GenerateId => {
-                        // TODO :)
-                        assembly_fdb::core::Field::Integer(2)
-                    }
+                    _ => panic!("Field value was not generated"),
                 })
                 .collect()
         })

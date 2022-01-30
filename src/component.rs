@@ -108,15 +108,15 @@ pub fn component_name_to_id(name: &str) -> eyre::Result<i32> {
     }
 }
 
-pub fn mod_type_to_table_name(name: &str) -> eyre::Result<String> {
+pub fn mod_type_to_table_name(name: &str) -> String {
     match name {
-        "npc" | "item" | "object" => Ok("Objects".to_string()),
-        "mission" => Ok("Missions".to_string()),
+        "npc" | "item" | "object" => "Objects".to_string(),
+        "mission" => "Missions".to_string(),
         _ => {
             if name.ends_with("PhysicsComponent") {
-                return Ok(String::from("PhysicsComponent"));
+                return String::from("PhysicsComponent");
             }
-            Ok(String::from(name))
+            String::from(name)
         }
     }
 }

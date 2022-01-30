@@ -106,6 +106,33 @@ impl Mod {
                 .insert(key.to_string(), OutputValue::FromJson(value.clone()));
         }
     }
+
+    fn set_fields_for_table(
+        &mut self,
+        mod_context: &ModContext,
+        table_name: &str,
+    ) -> eyre::Result<()> {
+        let table_name = mod_type_to_table_name(table_name);
+        for src_table in mod_context.database.tables()?.iter() {
+            let src_table = src_table?;
+            if src_table.name() == table_name {
+                let mut fields = make_row_fields(&src_table, &self.output_values)?;
+                // run all Field::Texts in fields through convert_path_specifier
+                for field in fields.iter_mut() {
+                    if let OutputValue::Known(Field::Text(ref mut text)) = field {
+                        *text = convert_path_specifier(self, text);
+                    }
+                }
+                self.fields = fields;
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
+    pub fn get_target_table_name(&self) -> String {
+        mod_type_to_table_name(&self.mod_type)
+    }
 }
 
 impl Default for Mod {
@@ -234,7 +261,8 @@ pub fn apply_mission_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre
     lu_mod.set_default("reward_reputation", 0)?;
     lu_mod.set_default("reward_currency_repeatable", 0)?;
 
-    add_row_in_table(mod_context, lu_mod, "Missions".to_string())?;
+    lu_mod.set_to_be_generated("id")?;
+    lu_mod.set_fields_for_table(mod_context, "Missions")?;
 
     for (index, task) in lu_mod.tasks.iter().enumerate() {
         let mut task_mod = Mod {
@@ -245,7 +273,7 @@ pub fn apply_mission_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre
         task_mod.set_value("taskType", 0)?; // TODO: read & convert
         task_mod.set_value("target", task.target.clone())?;
         task_mod.set_value("targetValue", task.count)?;
-        task_mod.set_value("id", lu_mod.id.clone())?; // will be converted
+        task_mod.set_awaiting_id("id", &lu_mod.id)?;
         task_mod.set_to_be_generated("uid")?;
         if let Some(target_group_string) = &task.target_group_string {
             task_mod.set_value("targetGroup", target_group_string.clone())?;
@@ -260,7 +288,7 @@ pub fn apply_mission_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre
             task_mod.set_value("targetGroup", group_string)?;
         }
 
-        add_row_in_table(mod_context, &mut task_mod, "MissionTasks".to_string())?;
+        task_mod.set_fields_for_table(mod_context, "MissionTasks")?;
         mod_context.mods.push(task_mod);
     }
 
@@ -310,30 +338,35 @@ pub fn apply_npc_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Re
 
     // to-do items
     if !lu_mod.missions.is_empty() {
-        let mut one_of_the_ids = String::new();
+        let first_id = lu_mod.id.clone() + ":MissionNPCComponent:0";
         for (index, mission) in lu_mod.missions.iter().enumerate() {
-            let component_id =
-                lu_mod.id.clone() + ":MissionNPCComponent:" + index.to_string().as_str();
+            let component_id = if index == 0 {
+                first_id.clone()
+            } else {
+                lu_mod.id.clone() + ":MissionNPCComponent:" + index.to_string().as_str()
+            };
             let mut mission_npc_component = Mod {
                 id: component_id.clone(),
                 mod_type: "MissionNPCComponent".to_string(),
                 ..lu_mod.clone()
             };
-            one_of_the_ids = component_id;
-            mission_npc_component.set_awaiting_id("id", &lu_mod.id)?;
+            if index == 0 {
+                mission_npc_component.set_to_be_generated("id")?;
+            } else {
+                mission_npc_component.set_awaiting_id("id", first_id.as_str())?;
+            }
             mission_npc_component.set_value("missionID", mission.mission.clone())?;
             mission_npc_component.set_value("offersMission", mission.offer)?;
             mission_npc_component.set_value("acceptsMission", mission.accept)?;
 
-            add_row_in_table(
-                mod_context,
-                &mut mission_npc_component,
-                "MissionNPCComponent".to_string(),
-            )?;
+            mission_npc_component.set_fields_for_table(mod_context, "MissionNPCComponent")?;
+
             mod_context.mods.push(mission_npc_component);
         }
-        lu_mod.components.push(one_of_the_ids);
+        lu_mod.components.push(first_id);
     }
+
+    lu_mod.set_to_be_generated("id")?;
 
     apply_object_mod(mod_context, lu_mod)?;
 
@@ -341,11 +374,13 @@ pub fn apply_npc_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Re
 }
 
 pub fn apply_object_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
-    add_row_in_table(mod_context, lu_mod, String::from("Objects"))
+    lu_mod.set_to_be_generated("id")?;
+    lu_mod.set_fields_for_table(mod_context, "Objects")
 }
 
 pub fn apply_component_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
-    add_row_in_table(mod_context, lu_mod, lu_mod.mod_type.clone()) //eh
+    lu_mod.set_to_be_generated("id")?;
+    lu_mod.set_fields_for_table(mod_context, lu_mod.mod_type.clone().as_str())
 }
 
 pub fn add_component(
@@ -363,29 +398,6 @@ pub fn add_component(
     apply_component_mod(mod_context, &mut output)?;
     mod_context.mods.push(output.clone());
     Ok(output)
-}
-
-pub fn add_row_in_table(
-    mod_context: &ModContext,
-    lu_mod: &mut Mod,
-    table_name: String,
-) -> eyre::Result<()> {
-    let table_name = mod_type_to_table_name(table_name.as_str())?;
-    for src_table in mod_context.database.tables()?.iter() {
-        let src_table = src_table?;
-        if src_table.name() == table_name {
-            let mut fields = make_row_fields(&src_table, &lu_mod.output_values)?;
-            // run all Field::Texts in fields through convert_path_specifier
-            for field in fields.iter_mut() {
-                if let OutputValue::Known(Field::Text(ref mut text)) = field {
-                    *text = convert_path_specifier(lu_mod, text);
-                }
-            }
-            lu_mod.fields = fields;
-            return Ok(());
-        }
-    }
-    Ok(())
 }
 
 pub fn make_row_fields(

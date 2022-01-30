@@ -2,6 +2,8 @@
 
 use crate::mod_type_to_table_name;
 use crate::ModContext;
+use crate::Phrase;
+use crate::Translation;
 use assembly_fdb::common::ValueType;
 use assembly_fdb::core::Field;
 use color_eyre::eyre::{self, eyre};
@@ -38,6 +40,8 @@ pub struct Mod {
     pub fields: Vec<OutputValue>,
     #[serde(skip)]
     pub dir: PathBuf,
+    #[serde(skip)]
+    pub new_locale_entries: Vec<Phrase>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -169,6 +173,7 @@ impl Default for Mod {
             defaults: HashMap::new(),
             fields: vec![],
             dir: PathBuf::new(),
+            new_locale_entries: vec![],
         }
     }
 }
@@ -388,7 +393,21 @@ pub fn apply_npc_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Re
     Ok(())
 }
 
-pub fn apply_object_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
+pub fn apply_object_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
+    if !lu_mod.locale.is_empty() {
+        let mut phrase = Phrase {
+            id: "Objects_{}_name".to_string(),
+            translations: vec![],
+        };
+        for (language, text) in &lu_mod.locale {
+            phrase.translations.push(Translation {
+                locale: language.to_string(),
+                value: text.to_string(),
+            })
+        }
+        lu_mod.new_locale_entries.push(phrase);
+    }
+
     lu_mod.set_to_be_generated("id")?;
     lu_mod.set_fields(mod_context)
 }

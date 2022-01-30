@@ -6,6 +6,8 @@ mod mod_context;
 mod mods;
 use crate::component::{component_name_to_id, mod_type_to_table_name};
 use crate::locale::Localization;
+use crate::locale::Phrase;
+use crate::locale::Translation;
 use crate::lu_mod::*;
 use crate::manifest::Manifest;
 use crate::mod_context::LookupFile;
@@ -213,6 +215,18 @@ fn main() -> eyre::Result<()> {
                     return Err(eyre!("No id for {}", id));
                 }
             }
+        }
+    }
+
+    // Add locale
+    for lu_mod in &mod_context.mods {
+        for new_locale_entry in &lu_mod.new_locale_entries {
+            let mut entry = new_locale_entry.clone();
+            entry.id = new_locale_entry.id.replace(
+                "{}",
+                &mod_context.lookup.get(&lu_mod.id).unwrap().to_string(),
+            );
+            mod_context.localization.phrases.phrase.push(entry);
         }
     }
 

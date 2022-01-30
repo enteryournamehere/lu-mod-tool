@@ -18,6 +18,13 @@ pub struct ModContext<'a> {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NewLocaleEntry {
+    pub id: String,
+    pub language: String,
+    pub value: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct LookupFile {
     pub ids: HashMap<String, i32>,
 }

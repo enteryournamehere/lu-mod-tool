@@ -26,14 +26,14 @@ pub struct Phrases {
     pub phrase: Vec<Phrase>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Phrase {
     pub id: String,
     #[serde(rename = "translation")]
     pub translations: Vec<Translation>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Translation {
     pub locale: String,
     #[serde(rename = "$value", default)]

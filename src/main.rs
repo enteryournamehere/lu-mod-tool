@@ -381,8 +381,8 @@ fn main() -> eyre::Result<()> {
     print!("Exporting locale... ");
     std::io::stdout().flush()?;
 
-    mod_context.localization.locales.count = mod_context.localization.locales.locale.len() as i32;
-    mod_context.localization.phrases.count = mod_context.localization.phrases.phrase.len() as i32;
+    mod_context.localization.locales.count = mod_context.localization.locales.locale.len();
+    mod_context.localization.phrases.count = mod_context.localization.phrases.phrase.len();
     write_xml(&mod_context.localization, Path::new("../locale/locale.xml"))?;
     let timer = print_timer(timer);
 

@@ -10,7 +10,7 @@ pub struct Localization {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Locales {
-    pub count: i32,
+    pub count: usize,
     pub locale: Vec<Locale>,
 }
 
@@ -22,7 +22,7 @@ pub struct Locale {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Phrases {
-    pub count: i32,
+    pub count: usize,
     pub phrase: Vec<Phrase>,
 }
 

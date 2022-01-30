@@ -8,6 +8,7 @@ use crate::component::{component_name_to_id, mod_type_to_table_name};
 use crate::locale::Localization;
 use crate::lu_mod::*;
 use crate::manifest::Manifest;
+use crate::mod_context::LookupFile;
 use crate::mod_context::ModContext;
 use crate::mods::Mods;
 use assembly_fdb::{core::Field, mem::Database, store};
@@ -383,6 +384,14 @@ fn main() -> eyre::Result<()> {
     mod_context.localization.locales.count = mod_context.localization.locales.locale.len() as i32;
     mod_context.localization.phrases.count = mod_context.localization.phrases.phrase.len() as i32;
     write_xml(&mod_context.localization, Path::new("../locale/locale.xml"))?;
+    let timer = print_timer(timer);
+
+    print!("Exporting lookup.json... ");
+    std::io::stdout().flush()?;
+    let lookup_save = LookupFile {
+        ids: mod_context.lookup.clone(),
+    };
+    write_json(lookup_save, Path::new("lookup.json"))?;
     let _ = print_timer(timer);
 
     println!("\nGenerated IDs:");
@@ -506,6 +515,15 @@ where
     let mut writer = BufWriter::new(File::create(path)?);
     let _ = writer.write(b"<?xml version=\"1.0\" encoding=\"UTF-8\" ?>");
     quick_xml::se::to_writer(&mut writer, &content)?;
+    Ok(())
+}
+
+fn write_json<T>(content: T, path: &Path) -> eyre::Result<()>
+where
+    T: serde::Serialize + std::fmt::Debug,
+{
+    let mut writer = BufWriter::new(File::create(&path)?);
+    serde_json::to_writer(&mut writer, &content)?;
     Ok(())
 }
 

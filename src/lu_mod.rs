@@ -107,12 +107,9 @@ impl Mod {
         }
     }
 
-    fn set_fields_for_table(
-        &mut self,
-        mod_context: &ModContext,
-        table_name: &str,
-    ) -> eyre::Result<()> {
-        let table_name = mod_type_to_table_name(table_name);
+    /// Generate the fields for DB insertion for this mod.
+    fn set_fields(&mut self, mod_context: &ModContext) -> eyre::Result<()> {
+        let table_name = mod_type_to_table_name(self.mod_type.as_str());
         for src_table in mod_context.database.tables()?.iter() {
             let src_table = src_table?;
             if src_table.name() == table_name {
@@ -132,6 +129,24 @@ impl Mod {
 
     pub fn get_target_table_name(&self) -> String {
         mod_type_to_table_name(&self.mod_type)
+    }
+
+    /// Create component, register it in the mod_context and link it to this mod.
+    pub fn add_component(
+        &mut self,
+        mod_context: &mut ModContext,
+        component_type: &str,
+    ) -> eyre::Result<Mod> {
+        let id_str = format!("{}:{}", self.id, component_type);
+        self.components.push(id_str.clone());
+        let mut output = Mod {
+            id: id_str,
+            mod_type: component_type.to_string(),
+            ..self.clone()
+        };
+        apply_component_mod(mod_context, &mut output)?;
+        mod_context.mods.push(output.clone());
+        Ok(output)
     }
 }
 
@@ -224,8 +239,8 @@ pub fn apply_item_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::R
     lu_mod.set_default("audioEquipMetaEventSet", "Weapon_Hammer_Generic")?;
     lu_mod.set_value("type", "Loot")?;
 
-    add_component(mod_context, "ItemComponent", lu_mod)?;
-    add_component(mod_context, "RenderComponent", lu_mod)?;
+    lu_mod.add_component(mod_context, "ItemComponent")?;
+    lu_mod.add_component(mod_context, "RenderComponent")?;
     // to-do skill comp
 
     apply_object_mod(mod_context, lu_mod)?;
@@ -262,7 +277,7 @@ pub fn apply_mission_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre
     lu_mod.set_default("reward_currency_repeatable", 0)?;
 
     lu_mod.set_to_be_generated("id")?;
-    lu_mod.set_fields_for_table(mod_context, "Missions")?;
+    lu_mod.set_fields(mod_context)?;
 
     for (index, task) in lu_mod.tasks.iter().enumerate() {
         let mut task_mod = Mod {
@@ -288,7 +303,7 @@ pub fn apply_mission_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre
             task_mod.set_value("targetGroup", group_string)?;
         }
 
-        task_mod.set_fields_for_table(mod_context, "MissionTasks")?;
+        task_mod.set_fields(mod_context)?;
         mod_context.mods.push(task_mod);
     }
 
@@ -332,9 +347,9 @@ pub fn apply_npc_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Re
 
     lu_mod.set_value("type", "UserGeneratedNPCs")?;
 
-    add_component(mod_context, "SimplePhysicsComponent", lu_mod)?;
-    add_component(mod_context, "RenderComponent", lu_mod)?;
-    add_component(mod_context, "MinifigComponent", lu_mod)?;
+    lu_mod.add_component(mod_context, "SimplePhysicsComponent")?;
+    lu_mod.add_component(mod_context, "RenderComponent")?;
+    lu_mod.add_component(mod_context, "MinifigComponent")?;
 
     // to-do items
     if !lu_mod.missions.is_empty() {
@@ -359,7 +374,7 @@ pub fn apply_npc_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Re
             mission_npc_component.set_value("offersMission", mission.offer)?;
             mission_npc_component.set_value("acceptsMission", mission.accept)?;
 
-            mission_npc_component.set_fields_for_table(mod_context, "MissionNPCComponent")?;
+            mission_npc_component.set_fields(mod_context)?;
 
             mod_context.mods.push(mission_npc_component);
         }
@@ -375,29 +390,12 @@ pub fn apply_npc_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Re
 
 pub fn apply_object_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
     lu_mod.set_to_be_generated("id")?;
-    lu_mod.set_fields_for_table(mod_context, "Objects")
+    lu_mod.set_fields(mod_context)
 }
 
 pub fn apply_component_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
     lu_mod.set_to_be_generated("id")?;
-    lu_mod.set_fields_for_table(mod_context, lu_mod.mod_type.clone().as_str())
-}
-
-pub fn add_component(
-    mod_context: &mut ModContext,
-    component_type: &str,
-    base: &mut Mod,
-) -> eyre::Result<Mod> {
-    let id_str = format!("{}:{}", base.id, component_type);
-    base.components.push(id_str.clone());
-    let mut output = Mod {
-        id: id_str,
-        mod_type: component_type.to_string(),
-        ..base.clone()
-    };
-    apply_component_mod(mod_context, &mut output)?;
-    mod_context.mods.push(output.clone());
-    Ok(output)
+    lu_mod.set_fields(mod_context)
 }
 
 pub fn make_row_fields(

@@ -176,7 +176,11 @@ fn main() -> eyre::Result<()> {
         .iter()
         .map(|(table_name, count)| {
             let table = get_table(&mod_context.database, table_name).unwrap();
-            let ids = find_available_ids(&table, *count).unwrap();
+            let ids = find_available_ids(&table, *count)
+                .unwrap()
+                .into_iter()
+                .rev() // reverse so that mods that get applied first get lower IDs
+                .collect();
             (table_name.clone(), ids)
         })
         .collect();
@@ -211,9 +215,9 @@ fn main() -> eyre::Result<()> {
         }
     }
 
+    // Create component registry
     let mut component_registry: Vec<Vec<Field>> = vec![];
 
-    // Create component registry
     for modification in mod_context.mods.iter() {
         match modification.mod_type.as_str() {
             // these go into the objects table
@@ -265,7 +269,6 @@ fn main() -> eyre::Result<()> {
 
         let to_add = {
             match src_table.name().into_owned().as_str() {
-                "Objects" => get_rows_for_insertion(&mod_context, "Objects"),
                 "ComponentsRegistry" => component_registry.clone(),
                 _ => get_rows_for_insertion(&mod_context, src_table.name().into_owned().as_str()),
             }

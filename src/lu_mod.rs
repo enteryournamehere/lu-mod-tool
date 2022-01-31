@@ -152,6 +152,39 @@ impl Mod {
         mod_context.mods.push(output.clone());
         Ok(output)
     }
+
+    pub fn add_locale(&mut self, phrase_id: &str) {
+        if !self.locale.is_empty() {
+            let phrase = Phrase {
+                id: phrase_id.to_string(),
+                translations: self
+                    .locale
+                    .iter()
+                    .map(|(k, v)| Translation {
+                        locale: k.clone(),
+                        value: v.clone(),
+                    })
+                    .collect::<Vec<Translation>>(),
+            };
+            self.new_locale_entries.push(phrase);
+        }
+    }
+
+    pub fn add_locale_from_value(&mut self, phrase_id: &str, key: &str) {
+        if let Some(serde_json::Value::Object(value)) = self.values.get(key) {
+            let phrase = Phrase {
+                id: phrase_id.to_string(),
+                translations: value
+                    .iter()
+                    .map(|(k, v)| Translation {
+                        locale: k.clone(),
+                        value: v.as_str().unwrap().to_string().clone(), // will crash if bad
+                    })
+                    .collect::<Vec<Translation>>(),
+            };
+            self.new_locale_entries.push(phrase);
+        }
+    }
 }
 
 impl Default for Mod {
@@ -280,15 +313,57 @@ pub fn apply_mission_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre
     lu_mod.set_default("reward_maxwallet", 0)?;
     lu_mod.set_default("reward_reputation", 0)?;
     lu_mod.set_default("reward_currency_repeatable", 0)?;
-
     lu_mod.set_to_be_generated("id")?;
+
     lu_mod.set_fields(mod_context)?;
 
+    // Locale
+    lu_mod.add_locale("Missions_{}_name");
+    lu_mod.add_locale_from_value("MissionText_{}_accept_chat_bubble", "accept_chat_bubble");
+    lu_mod.add_locale_from_value("MissionText_{}_accept_chat_bubble", "chat_accept");
+    lu_mod.add_locale_from_value("MissionText_{}_chat_state_1", "chat_state_1");
+    lu_mod.add_locale_from_value("MissionText_{}_chat_state_2", "chat_state_2");
+    lu_mod.add_locale_from_value("MissionText_{}_chat_state_3", "chat_state_3");
+    lu_mod.add_locale_from_value("MissionText_{}_chat_state_4", "chat_state_4");
+    lu_mod.add_locale_from_value("MissionText_{}_chat_state_1", "chat_available");
+    lu_mod.add_locale_from_value("MissionText_{}_chat_state_2", "chat_active");
+    lu_mod.add_locale_from_value("MissionText_{}_chat_state_3", "chat_ready_to_complete");
+    lu_mod.add_locale_from_value("MissionText_{}_chat_state_4", "chat_complete");
+    lu_mod.add_locale_from_value(
+        "MissionText_{}_completion_succeed_tip",
+        "completion_succeed_tip",
+    );
+    lu_mod.add_locale_from_value("MissionText_{}_in_progress", "in_progress");
+    lu_mod.add_locale_from_value("MissionText_{}_offer", "offer");
+    lu_mod.add_locale_from_value("MissionText_{}_ready_to_complete", "ready_to_complete");
+
+    // MissionText entry
+    let mut mission_text_mod = Mod {
+        id: lu_mod.id.clone() + ":MissionText",
+        mod_type: "MissionText".to_string(),
+        dir: lu_mod.dir.clone(),
+        ..Default::default()
+    };
+
+    // Set values
+    mission_text_mod.set_value("localize", true)?;
+    mission_text_mod.set_value("locStatus", 2)?;
+    mission_text_mod.set_awaiting_id("id", &lu_mod.id)?;
+
+    // Convert to output fields
+    mission_text_mod.set_fields(mod_context)?;
+
+    mod_context.mods.push(mission_text_mod);
+
+    // Mission Tasks
     for (index, task) in lu_mod.tasks.iter().enumerate() {
         let mut task_mod = Mod {
             id: lu_mod.id.clone() + ":tasks:" + index.to_string().as_str(),
             mod_type: "MissionTasks".to_string(),
-            ..lu_mod.clone()
+            locale: task.locale.clone(),
+            output_values: lu_mod.output_values.clone(),
+            dir: lu_mod.dir.clone(),
+            ..Default::default()
         };
         task_mod.set_value("taskType", 0)?; // TODO: read & convert
         task_mod.set_value("target", task.target.clone())?;
@@ -309,6 +384,9 @@ pub fn apply_mission_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre
         }
 
         task_mod.set_fields(mod_context)?;
+
+        task_mod.add_locale("MissionTasks_{}_description");
+
         mod_context.mods.push(task_mod);
     }
 
@@ -368,7 +446,9 @@ pub fn apply_npc_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Re
             let mut mission_npc_component = Mod {
                 id: component_id.clone(),
                 mod_type: "MissionNPCComponent".to_string(),
-                ..lu_mod.clone()
+                dir: lu_mod.dir.clone(),
+                output_values: lu_mod.output_values.clone(),
+                ..Default::default()
             };
             if index == 0 {
                 mission_npc_component.set_to_be_generated("id")?;
@@ -394,19 +474,7 @@ pub fn apply_npc_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Re
 }
 
 pub fn apply_object_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
-    if !lu_mod.locale.is_empty() {
-        let mut phrase = Phrase {
-            id: "Objects_{}_name".to_string(),
-            translations: vec![],
-        };
-        for (language, text) in &lu_mod.locale {
-            phrase.translations.push(Translation {
-                locale: language.to_string(),
-                value: text.to_string(),
-            })
-        }
-        lu_mod.new_locale_entries.push(phrase);
-    }
+    lu_mod.add_locale("Objects_{}_name");
 
     lu_mod.set_to_be_generated("id")?;
     lu_mod.set_fields(mod_context)

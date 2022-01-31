@@ -178,7 +178,7 @@ impl Mod {
                     .iter()
                     .map(|(k, v)| Translation {
                         locale: k.clone(),
-                        value: v.as_str().unwrap().to_string().clone(), // will crash if bad
+                        value: v.as_str().unwrap().to_string(), // will crash if bad
                     })
                     .collect::<Vec<Translation>>(),
             };

@@ -25,7 +25,8 @@ pub struct Mod {
     pub components: Vec<String>,
     pub table: Option<String>,
     // items: Option<Vec<JsonValue>>,
-    // skills: Option<Vec<JsonValue>>,
+    #[serde(default)]
+    skills: Vec<JsonValue>,
     #[serde(default)]
     tasks: Vec<MissionTask>,
     #[serde(default)]
@@ -197,7 +198,7 @@ impl Default for Mod {
             components: vec![],
             table: None,
             // items: None,
-            // skills: None,
+            skills: vec![],
             tasks: vec![],
             missions: vec![],
             locale: HashMap::new(),
@@ -279,8 +280,39 @@ pub fn apply_item_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::R
 
     lu_mod.add_component(mod_context, "ItemComponent")?;
     lu_mod.add_component(mod_context, "RenderComponent")?;
-    // to-do skill comp
 
+    if !lu_mod.skills.is_empty() {
+        lu_mod.add_component(mod_context, "SkillComponent")?;
+
+        for (index, skill) in lu_mod.skills.iter().enumerate() {
+            let mut object_skills_mod = Mod {
+                id: lu_mod.id.clone() + ":skills:" + index.to_string().as_str(),
+                mod_type: "ObjectSkills".to_string(),
+                dir: lu_mod.dir.clone(),
+                ..Default::default()
+            };
+            object_skills_mod.set_value(
+                "castOnType",
+                if let Some(cast_on_type) = lu_mod.values.get("castOnType") {
+                    cast_on_type.as_i64().unwrap()
+                } else {
+                    0
+                },
+            )?;
+            object_skills_mod.set_value("AICombatWeight", 0)?;
+            object_skills_mod.set_awaiting_id("objectTemplate", &lu_mod.id)?;
+
+            if skill.is_number() {
+                object_skills_mod.set_value("skillID", skill.as_i64().unwrap())?;
+            } else {
+                object_skills_mod.set_awaiting_id("skillID", skill.as_str().unwrap())?;
+            }
+
+            object_skills_mod.set_fields(mod_context)?;
+
+            mod_context.mods.push(object_skills_mod);
+        }
+    }
     apply_object_mod(mod_context, lu_mod)?;
 
     Ok(())

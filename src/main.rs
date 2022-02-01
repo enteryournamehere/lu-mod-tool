@@ -246,7 +246,16 @@ fn main() -> eyre::Result<()> {
                         .unwrap(); // bad
                     let component_number =
                         component_name_to_id(linked_component.mod_type.as_str())?;
-                    let component_id = mod_context.lookup.get(linked_component_name).unwrap(); //bad
+                    let component_has_table = get_table(
+                        &mod_context.database,
+                        &linked_component.get_target_table_name(),
+                    )
+                    .is_ok();
+                    let component_id = if component_has_table {
+                        mod_context.lookup.get(linked_component_name).unwrap()
+                    } else {
+                        &0
+                    };
                     let obj_id = match modification.fields[0] {
                         OutputValue::Known(Field::Integer(id)) => id,
                         _ => panic!("Object ID not an integer"),

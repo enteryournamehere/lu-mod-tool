@@ -318,7 +318,16 @@ pub fn apply_item_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::R
     Ok(())
 }
 
-pub fn apply_environmental_mod(mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
+pub fn apply_environmental_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
+    lu_mod.set_default("static", 1)?;
+    lu_mod.set_default("shader_id", 1)?;
+    lu_mod.set_value("type", "Environmental")?;
+
+    lu_mod.add_component(mod_context, "RenderComponent")?;
+    lu_mod.add_component(mod_context, "SimplePhysicsComponent")?;
+
+    apply_object_mod(mod_context, lu_mod)?;
+
     Ok(())
 }
 

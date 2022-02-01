@@ -6,10 +6,8 @@ Apart from these limitations, it can be used in the same way as InfectedRose.Int
 Supported mod types:
 - [x] SQL
 - [x] Object + separately defined components
-- [ ] Environmental
+- [x] Environmental
 - [x] Item
-    - [x] Core functionality
-    - [ ] Linked skills
 - [x] NPC
 - [ ] Enemy
 - [ ] Mission

@@ -229,7 +229,9 @@ pub fn convert_path_specifier(lu_mod: &Mod, contents: &str) -> String {
             relative_path_to_mods = "../../mods";
             relative_path_from_mods = physics_path;
         } else if let Some(icon_path) = asset_path.strip_prefix("ICON:") {
-            relative_path_to_mods = "../../../mods";
+            // ????? this is necessary for mission icons in the passport to show up;
+            // simply using ../../../mods does not work
+            relative_path_to_mods = "../../textures/../../mods";
             relative_path_from_mods = icon_path;
         }
 
@@ -241,6 +243,35 @@ pub fn convert_path_specifier(lu_mod: &Mod, contents: &str) -> String {
         return path.to_str().unwrap().to_string().replace("/", "\\");
     }
     contents.to_string()
+}
+
+/// Convert ASSET: path to ASSET:ICON: path
+pub fn as_icon_path(path: &str) -> String {
+    if !path.starts_with("ASSET:ICON") {
+        if let Some(asset_path) = path.strip_prefix("ASSET:") {
+            return format!("ASSET:ICON:{}", asset_path);
+        }
+    }
+    path.to_string()
+}
+
+/// Create and register icon mod
+pub fn add_icon(mod_context: &mut ModContext, base_mod: &Mod, path: &str, id_suffix: &str) -> eyre::Result<String> {
+    let icon_path = as_icon_path(path);
+    let icon_id = base_mod.id.clone() + ":icon:" + id_suffix;
+    let mut icon_mod = Mod {
+        id: icon_id.clone(),
+        mod_type: "Icons".to_string(),
+        dir: base_mod.dir.clone(),
+        ..Default::default()
+    };
+    icon_mod.set_to_be_generated("IconID")?;
+    icon_mod.set_value("IconPath", &icon_path)?;
+
+    icon_mod.set_fields(mod_context)?;
+    mod_context.mods.push(icon_mod);
+
+    Ok(icon_id)
 }
 
 pub fn apply_sql_mod(_mod_context: &ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
@@ -391,6 +422,17 @@ pub fn apply_mission_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre
     mission_text_mod.set_value("locStatus", 2)?;
     mission_text_mod.set_awaiting_id("id", &lu_mod.id)?;
 
+    // Add icons
+    if let Some(serde_json::Value::String(value)) = lu_mod.values.get("icon") {
+        let icon_id = add_icon(mod_context, lu_mod, value, "icon")?;
+        lu_mod.set_awaiting_id("missionIconID", &icon_id)?;
+    }
+
+    if let Some(serde_json::Value::String(value)) = lu_mod.values.get("icon-turn-in") {
+        let icon_id = add_icon(mod_context, lu_mod, value, "icon-turn-in")?;
+        mission_text_mod.set_awaiting_id("turnInIconID", &icon_id)?;
+    }
+
     // Convert to output fields
     mission_text_mod.set_fields(mod_context)?;
 
@@ -398,8 +440,9 @@ pub fn apply_mission_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre
 
     // Mission Tasks
     for (index, task) in lu_mod.tasks.iter().enumerate() {
+        let task_mod_id = lu_mod.id.clone() + ":tasks:" + index.to_string().as_str();
         let mut task_mod = Mod {
-            id: lu_mod.id.clone() + ":tasks:" + index.to_string().as_str(),
+            id: task_mod_id.clone(),
             mod_type: "MissionTasks".to_string(),
             locale: task.locale.clone(),
             output_values: lu_mod.output_values.clone(),
@@ -409,6 +452,7 @@ pub fn apply_mission_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre
         task_mod.set_value("taskType", 0)?; // TODO: read & convert
         task_mod.set_value("target", task.target.clone())?;
         task_mod.set_value("targetValue", task.count)?;
+        task_mod.set_value("localize", true)?;
         task_mod.set_awaiting_id("id", &lu_mod.id)?;
         task_mod.set_to_be_generated("uid")?;
         if let Some(target_group_string) = &task.target_group_string {
@@ -422,6 +466,16 @@ pub fn apply_mission_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre
                 .collect::<Vec<String>>()
                 .join(",");
             task_mod.set_value("targetGroup", group_string)?;
+        }
+
+        // Add icons
+        if !&task.icon.is_empty() {
+            let icon_id = add_icon(mod_context, &task_mod, &task.icon, "task-icon-large")?;
+            task_mod.set_awaiting_id("largeTaskIconID", &icon_id)?;
+        }
+        if !&task.small_icon.is_empty () {
+            let icon_id = add_icon(mod_context, &task_mod, &task.small_icon, "task-icon-small")?;
+            task_mod.set_awaiting_id("IconID", &icon_id)?;
         }
 
         task_mod.set_fields(mod_context)?;

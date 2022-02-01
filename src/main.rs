@@ -77,7 +77,6 @@ fn main() -> eyre::Result<()> {
     println!("Input: {:?}", opts.input);
 
     let configuration = read_or_create_json::<Mods>(&PathBuf::from(&opts.input))?;
-    print!("{:?}", configuration);
 
     std::env::set_current_dir(opts.input.parent().unwrap())?;
 
@@ -298,11 +297,11 @@ fn main() -> eyre::Result<()> {
             }
         };
 
-        let unique_key_count = to_add.len() + src_table.bucket_count();
-        let new_bucket_count = if unique_key_count == 0 {
+        let new_row_count = to_add.len() + src_table.row_iter().count();
+        let new_bucket_count = if new_row_count == 0 {
             0
         } else {
-            u32::next_power_of_two(unique_key_count as u32)
+            u32::next_power_of_two(new_row_count as u32)
         };
 
         let mut dest_table = store::Table::new(new_bucket_count as usize);
@@ -468,8 +467,6 @@ fn apply_mod_file(
             _ => apply_component_mod(mod_context, &mut lu_mod)?,
         };
 
-        println!("      └ {:?} fields", &lu_mod.fields.len());
-
         mod_context.mods.push(lu_mod.clone()); // ehhh
     }
     Ok(())
@@ -486,7 +483,7 @@ fn get_mods_for_table<'a>(mod_context: &'a ModContext, target_table: &str) -> Ve
 fn get_rows_for_insertion(mod_context: &ModContext, target_table: &str) -> Vec<Vec<Field>> {
     get_mods_for_table(mod_context, target_table)
         .iter()
-        .map(|modification| modification.fields.clone())
+        .map(|modification| &modification.fields)
         .map(|fields| {
             fields
                 .iter()

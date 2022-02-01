@@ -10,9 +10,6 @@ Supported mod types:
 - [x] Item
 - [x] NPC
 - [ ] Enemy
-- [ ] Mission
-    - [x] Core functionality
-    - [x] Locale
-    - [ ] Icons
+- [x] Mission
 - [ ] Zone
 - [ ] Skill

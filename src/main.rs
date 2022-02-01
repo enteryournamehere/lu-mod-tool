@@ -2,6 +2,7 @@ mod component;
 mod locale;
 mod lu_mod;
 mod manifest;
+mod mission;
 mod mod_context;
 mod mods;
 use crate::component::{component_name_to_id, mod_type_to_table_name};
@@ -472,7 +473,10 @@ fn apply_mod_file(
     Ok(())
 }
 
-fn get_mods_for_table<'a>(mod_context: &'a ModContext, target_table: &'a str) -> impl Iterator<Item = &'a Mod> {
+fn get_mods_for_table<'a>(
+    mod_context: &'a ModContext,
+    target_table: &'a str,
+) -> impl Iterator<Item = &'a Mod> {
     mod_context
         .mods
         .iter()

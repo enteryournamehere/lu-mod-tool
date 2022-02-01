@@ -1,5 +1,6 @@
-#![allow(unused_variables)]
-
+use crate::mission::parse_mission_task_type;
+use crate::mission::MissionOffer;
+use crate::mission::MissionTask;
 use crate::mod_type_to_table_name;
 use crate::ModContext;
 use crate::Phrase;
@@ -43,29 +44,6 @@ pub struct Mod {
     pub dir: PathBuf,
     #[serde(skip)]
     pub new_locale_entries: Vec<Phrase>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MissionOffer {
-    pub mission: String,
-    pub accept: bool,
-    pub offer: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct MissionTask {
-    #[serde(rename = "type")]
-    pub task_type: String,
-    pub target: JsonValue,
-    pub count: i32,
-    pub group: Vec<JsonValue>,
-    #[serde(rename = "location")]
-    pub target_group_string: Option<String>,
-    pub parameters: Option<String>,
-    pub icon: String,
-    #[serde(rename = "small-icon")]
-    pub small_icon: String,
-    pub locale: HashMap<String, String>,
 }
 
 impl Mod {
@@ -256,7 +234,12 @@ pub fn as_icon_path(path: &str) -> String {
 }
 
 /// Create and register icon mod
-pub fn add_icon(mod_context: &mut ModContext, base_mod: &Mod, path: &str, id_suffix: &str) -> eyre::Result<String> {
+pub fn add_icon(
+    mod_context: &mut ModContext,
+    base_mod: &Mod,
+    path: &str,
+    id_suffix: &str,
+) -> eyre::Result<String> {
     let icon_path = as_icon_path(path);
     let icon_id = base_mod.id.clone() + ":icon:" + id_suffix;
     let mut icon_mod = Mod {
@@ -449,7 +432,7 @@ pub fn apply_mission_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre
             dir: lu_mod.dir.clone(),
             ..Default::default()
         };
-        task_mod.set_value("taskType", 0)?; // TODO: read & convert
+        task_mod.set_value("taskType", parse_mission_task_type(&task.task_type)?)?;
         task_mod.set_value("target", task.target.clone())?;
         task_mod.set_value("targetValue", task.count)?;
         task_mod.set_value("localize", true)?;
@@ -473,7 +456,7 @@ pub fn apply_mission_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre
             let icon_id = add_icon(mod_context, &task_mod, &task.icon, "task-icon-large")?;
             task_mod.set_awaiting_id("largeTaskIconID", &icon_id)?;
         }
-        if !&task.small_icon.is_empty () {
+        if !&task.small_icon.is_empty() {
             let icon_id = add_icon(mod_context, &task_mod, &task.small_icon, "task-icon-small")?;
             task_mod.set_awaiting_id("IconID", &icon_id)?;
         }

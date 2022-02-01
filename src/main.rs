@@ -472,17 +472,15 @@ fn apply_mod_file(
     Ok(())
 }
 
-fn get_mods_for_table<'a>(mod_context: &'a ModContext, target_table: &str) -> Vec<&'a Mod> {
+fn get_mods_for_table<'a>(mod_context: &'a ModContext, target_table: &'a str) -> impl Iterator<Item = &'a Mod> {
     mod_context
         .mods
         .iter()
-        .filter(|modification| modification.get_target_table_name() == target_table)
-        .collect()
+        .filter(move |modification| modification.get_target_table_name() == target_table)
 }
 
 fn get_rows_for_insertion(mod_context: &ModContext, target_table: &str) -> Vec<Vec<Field>> {
     get_mods_for_table(mod_context, target_table)
-        .iter()
         .map(|modification| &modification.fields)
         .map(|fields| {
             fields

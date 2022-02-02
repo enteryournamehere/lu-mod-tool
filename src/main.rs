@@ -459,6 +459,7 @@ fn apply_mod_file(
             "environmental" => apply_environmental_mod(mod_context, &mut lu_mod)?,
             "mission" => apply_mission_mod(mod_context, &mut lu_mod)?,
             "npc" => apply_npc_mod(mod_context, &mut lu_mod)?,
+            "enemy" => apply_enemy_mod(mod_context, &mut lu_mod)?,
             "object" => apply_object_mod(mod_context, &mut lu_mod)?,
             _ => apply_component_mod(mod_context, &mut lu_mod)?,
         };

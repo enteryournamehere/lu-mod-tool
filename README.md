@@ -9,7 +9,7 @@ Supported mod types:
 - [x] Environmental
 - [x] Item
 - [x] NPC
-- [ ] Enemy
+- [x] Enemy
 - [x] Mission
 - [ ] Zone
 - [ ] Skill

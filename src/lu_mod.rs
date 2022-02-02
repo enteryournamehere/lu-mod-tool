@@ -164,6 +164,38 @@ impl Mod {
             self.new_locale_entries.push(phrase);
         }
     }
+
+    fn link_skills(&mut self, mod_context: &mut ModContext) -> eyre::Result<()> {
+        for (index, skill) in self.skills.iter().enumerate() {
+            let mut object_skills_mod = Mod {
+                id: self.id.clone() + ":skills:" + index.to_string().as_str(),
+                mod_type: "ObjectSkills".to_string(),
+                dir: self.dir.clone(),
+                ..Default::default()
+            };
+            object_skills_mod.set_value(
+                "castOnType",
+                if let Some(cast_on_type) = self.values.get("castOnType") {
+                    cast_on_type.as_i64().unwrap()
+                } else {
+                    0
+                },
+            )?;
+            object_skills_mod.set_value("AICombatWeight", 0)?;
+            object_skills_mod.set_awaiting_id("objectTemplate", &self.id)?;
+
+            if skill.is_number() {
+                object_skills_mod.set_value("skillID", skill.as_i64().unwrap())?;
+            } else {
+                object_skills_mod.set_awaiting_id("skillID", skill.as_str().unwrap())?;
+            }
+
+            object_skills_mod.set_fields(mod_context)?;
+
+            mod_context.mods.push(object_skills_mod);
+        }
+        Ok(())
+    }
 }
 
 impl Default for Mod {
@@ -295,38 +327,8 @@ pub fn apply_item_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::R
     lu_mod.add_component(mod_context, "ItemComponent")?;
     lu_mod.add_component(mod_context, "RenderComponent")?;
 
-    if !lu_mod.skills.is_empty() {
-        lu_mod.add_component(mod_context, "SkillComponent")?;
+    lu_mod.link_skills(mod_context)?;
 
-        for (index, skill) in lu_mod.skills.iter().enumerate() {
-            let mut object_skills_mod = Mod {
-                id: lu_mod.id.clone() + ":skills:" + index.to_string().as_str(),
-                mod_type: "ObjectSkills".to_string(),
-                dir: lu_mod.dir.clone(),
-                ..Default::default()
-            };
-            object_skills_mod.set_value(
-                "castOnType",
-                if let Some(cast_on_type) = lu_mod.values.get("castOnType") {
-                    cast_on_type.as_i64().unwrap()
-                } else {
-                    0
-                },
-            )?;
-            object_skills_mod.set_value("AICombatWeight", 0)?;
-            object_skills_mod.set_awaiting_id("objectTemplate", &lu_mod.id)?;
-
-            if skill.is_number() {
-                object_skills_mod.set_value("skillID", skill.as_i64().unwrap())?;
-            } else {
-                object_skills_mod.set_awaiting_id("skillID", skill.as_str().unwrap())?;
-            }
-
-            object_skills_mod.set_fields(mod_context)?;
-
-            mod_context.mods.push(object_skills_mod);
-        }
-    }
     apply_object_mod(mod_context, lu_mod)?;
 
     Ok(())
@@ -545,6 +547,103 @@ pub fn apply_npc_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Re
     }
 
     lu_mod.set_to_be_generated("id")?;
+
+    apply_object_mod(mod_context, lu_mod)?;
+
+    Ok(())
+}
+
+pub fn apply_enemy_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Result<()> {
+    // Controller
+    lu_mod.set_default("physics_asset", "miscellaneous\\standard_enemy.hkx")?;
+    lu_mod.set_default("static", 0)?;
+    lu_mod.set_default("jump", 4)?;
+    lu_mod.set_default("doublejump", 0)?;
+    lu_mod.set_default("speed", 8)?;
+    lu_mod.set_default("rotSpeed", 720)?;
+    lu_mod.set_default("playerHeight", 4.4)?;
+    lu_mod.set_default("playerRadius", 1.7)?;
+    lu_mod.set_default("pcShapeType", 0)?;
+    lu_mod.set_default("collisionGroup", 12)?;
+    lu_mod.set_default("airSpeed", 5)?;
+    lu_mod.set_default("jumpAirSpeed", 25)?;
+
+    // Render
+    lu_mod.set_default("render_asset", "animations\\creatures\\cre_strombie.kfm")?;
+    lu_mod.set_default("animationGroupIDs", "513,535")?;
+    lu_mod.set_default("shader_id", 66)?;
+    lu_mod.set_default("interactionDistance", JsonValue::Null)?;
+    lu_mod.set_default("chatBubbleOffset", JsonValue::Null)?;
+    lu_mod.set_default("fade", true)?;
+    lu_mod.set_default("fadeInTime", 0.1)?;
+    lu_mod.set_default("billboardHeight", JsonValue::Null)?;
+    lu_mod.set_default("AudioMetaEventSet", JsonValue::Null)?;
+    lu_mod.set_default("usedropshadow", false)?;
+    lu_mod.set_default("preloadAnimations", false)?;
+    lu_mod.set_default("ignoreCameraCollision", false)?;
+    lu_mod.set_default("gradualSnap", false)?;
+    lu_mod.set_default("staticBillboard", false)?;
+    lu_mod.set_default("attachIndicatorsToNode", false)?;
+
+    // Destroyable
+    lu_mod.set_default("life", 1)?;
+    lu_mod.set_default("armor", 0)?;
+    lu_mod.set_default("imagination", 0)?;
+    lu_mod.set_default("level", 1)?;
+    lu_mod.set_default("faction", 4)?;
+    lu_mod.set_default("factionList", "4")?;
+    lu_mod.set_default("isnpc", true)?;
+    lu_mod.set_default("isSmashable", true)?;
+    lu_mod.set_default("attack_priority", 1)?;
+    lu_mod.set_default("death_behavior", 2)?;
+    lu_mod.set_default("CurrencyIndex", 1)?;
+    lu_mod.set_default("LootMatrixIndex", 160)?;
+    lu_mod.set_default("difficultyLevel", JsonValue::Null)?;
+
+    // Movement
+    lu_mod.set_default("MovementType", "Wander")?;
+    lu_mod.set_default("WanderChance", 90)?;
+    lu_mod.set_default("WanderDelayMin", 3)?;
+    lu_mod.set_default("WanderDelayMax", 6)?;
+    lu_mod.set_default("WanderSpeed", 0.5)?;
+    lu_mod.set_default("WanderRadius", 8)?;
+    lu_mod.set_default("attachedPath", JsonValue::Null)?;
+
+    // BaseCombatAI
+    lu_mod.set_default("behaviorType", 1)?;
+    lu_mod.set_default("minRoundLength", 3)?;
+    lu_mod.set_default("maxRoundLength", 5)?;
+    lu_mod.set_default("pursuitSpeed", 2)?;
+    lu_mod.set_default("spawnTimer", 1)?;
+    lu_mod.set_default("tetherSpeed", 4)?;
+    lu_mod.set_default("softTetherRadius", 25)?;
+    lu_mod.set_default("hardTetherRadius", 101)?;
+    lu_mod.set_default("tetherEffectID", 6270)?;
+    lu_mod.set_default("combatRoundLength", 4)?;
+    lu_mod.set_default("combatRole", 5)?;
+    lu_mod.set_default("combatStartDelay", 1.5)?;
+    lu_mod.set_default("aggroRadius", 25)?;
+    lu_mod.set_default("ignoreMediator", true)?;
+    lu_mod.set_default("ignoreStatReset", false)?;
+    lu_mod.set_default("ignoreParent", false)?;
+
+    // Object
+    lu_mod.set_default("npcTemplateID", JsonValue::Null)?;
+    lu_mod.set_default("nametag", true)?;
+    lu_mod.set_default("placeable", true)?;
+    lu_mod.set_default("localize", true)?;
+    lu_mod.set_default("locStatus", 2)?;
+
+    lu_mod.set_value("type", "Enemies")?;
+
+    lu_mod.add_component(mod_context, "ControllablePhysicsComponent")?;
+    lu_mod.add_component(mod_context, "RenderComponent")?;
+    lu_mod.add_component(mod_context, "DestructibleComponent")?;
+    lu_mod.add_component(mod_context, "SkillComponent")?;
+    lu_mod.add_component(mod_context, "MovementAIComponent")?;
+    lu_mod.add_component(mod_context, "BaseCombatAIComponent")?;
+
+    lu_mod.link_skills(mod_context)?;
 
     apply_object_mod(mod_context, lu_mod)?;
 

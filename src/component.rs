@@ -110,7 +110,7 @@ pub fn component_name_to_id(name: &str) -> eyre::Result<i32> {
 
 pub fn mod_type_to_table_name(name: &str) -> String {
     match name {
-        "npc" | "item" | "object" | "environmental" => "Objects".to_string(),
+        "npc" | "item" | "object" | "environmental" | "enemy" => "Objects".to_string(),
         "mission" => "Missions".to_string(),
         _ => {
             if name.ends_with("PhysicsComponent") {

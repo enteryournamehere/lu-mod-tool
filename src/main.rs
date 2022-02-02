@@ -234,40 +234,35 @@ fn main() -> eyre::Result<()> {
     let mut component_registry: Vec<Vec<Field>> = vec![];
 
     for modification in mod_context.mods.iter() {
-        match modification.mod_type.as_str() {
-            // these go into the objects table
-            "object" | "item" | "npc" => {
-                let linked_components = &modification.components;
-                for linked_component_name in linked_components {
-                    let linked_component = &mod_context
-                        .mods
-                        .iter()
-                        .find(|m| &m.id == linked_component_name)
-                        .unwrap(); // bad
-                    let component_number =
-                        component_name_to_id(linked_component.mod_type.as_str())?;
-                    let component_has_table = get_table(
-                        &mod_context.database,
-                        &linked_component.get_target_table_name(),
-                    )
-                    .is_ok();
-                    let component_id = if component_has_table {
-                        mod_context.lookup.get(linked_component_name).unwrap()
-                    } else {
-                        &0
-                    };
-                    let obj_id = match modification.fields[0] {
-                        OutputValue::Known(Field::Integer(id)) => id,
-                        _ => panic!("Object ID not an integer"),
-                    };
-                    component_registry.push(vec![
-                        Field::Integer(obj_id),
-                        Field::Integer(component_number),
-                        Field::Integer(*component_id),
-                    ]);
-                }
+        if modification.get_target_table_name().as_str() == "Objects" {
+            let linked_components = &modification.components;
+            for linked_component_name in linked_components {
+                let linked_component = &mod_context
+                    .mods
+                    .iter()
+                    .find(|m| &m.id == linked_component_name)
+                    .unwrap(); // bad
+                let component_number = component_name_to_id(linked_component.mod_type.as_str())?;
+                let component_has_table = get_table(
+                    &mod_context.database,
+                    &linked_component.get_target_table_name(),
+                )
+                .is_ok();
+                let component_id = if component_has_table {
+                    mod_context.lookup.get(linked_component_name).unwrap()
+                } else {
+                    &0
+                };
+                let obj_id = match modification.fields[0] {
+                    OutputValue::Known(Field::Integer(id)) => id,
+                    _ => panic!("Object ID not an integer"),
+                };
+                component_registry.push(vec![
+                    Field::Integer(obj_id),
+                    Field::Integer(component_number),
+                    Field::Integer(*component_id),
+                ]);
             }
-            _ => {}
         }
     }
 

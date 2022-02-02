@@ -25,7 +25,8 @@ pub struct Mod {
     #[serde(default)]
     pub components: Vec<String>,
     pub table: Option<String>,
-    // items: Option<Vec<JsonValue>>,
+    #[serde(default)]
+    items: Vec<JsonValue>,
     #[serde(default)]
     skills: Vec<JsonValue>,
     #[serde(default)]
@@ -184,11 +185,7 @@ impl Mod {
             object_skills_mod.set_value("AICombatWeight", 0)?;
             object_skills_mod.set_awaiting_id("objectTemplate", &self.id)?;
 
-            if skill.is_number() {
-                object_skills_mod.set_value("skillID", skill.as_i64().unwrap())?;
-            } else {
-                object_skills_mod.set_awaiting_id("skillID", skill.as_str().unwrap())?;
-            }
+            object_skills_mod.set_value("skillID", skill)?;
 
             object_skills_mod.set_fields(mod_context)?;
 
@@ -207,7 +204,7 @@ impl Default for Mod {
             show_defaults: None,
             components: vec![],
             table: None,
-            // items: None,
+            items: vec![],
             skills: vec![],
             tasks: vec![],
             missions: vec![],
@@ -514,7 +511,7 @@ pub fn apply_npc_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Re
     lu_mod.add_component(mod_context, "RenderComponent")?;
     lu_mod.add_component(mod_context, "MinifigComponent")?;
 
-    // to-do items
+    // Missions
     if !lu_mod.missions.is_empty() {
         let first_id = lu_mod.id.clone() + ":MissionNPCComponent:0";
         for (index, mission) in lu_mod.missions.iter().enumerate() {
@@ -542,6 +539,38 @@ pub fn apply_npc_mod(mod_context: &mut ModContext, lu_mod: &mut Mod) -> eyre::Re
             mission_npc_component.set_fields(mod_context)?;
 
             mod_context.mods.push(mission_npc_component);
+        }
+        lu_mod.components.push(first_id);
+    }
+
+    // Items
+    if !lu_mod.items.is_empty() {
+        let first_id = lu_mod.id.clone() + ":InventoryComponent:0";
+        for (index, item) in lu_mod.items.iter().enumerate() {
+            let component_id = if index == 0 {
+                first_id.clone()
+            } else {
+                lu_mod.id.clone() + ":InventoryComponent:" + index.to_string().as_str()
+            };
+            let mut inventory_component_mod = Mod {
+                id: component_id.clone(),
+                mod_type: "InventoryComponent".to_string(),
+                dir: lu_mod.dir.clone(),
+                output_values: lu_mod.output_values.clone(),
+                ..Default::default()
+            };
+            if index == 0 {
+                inventory_component_mod.set_to_be_generated("id")?;
+            } else {
+                inventory_component_mod.set_awaiting_id("id", first_id.as_str())?;
+            }
+            inventory_component_mod.set_value("count", 1)?;
+            inventory_component_mod.set_value("equip", true)?;
+            inventory_component_mod.set_value("itemid", item)?;
+
+            inventory_component_mod.set_fields(mod_context)?;
+
+            mod_context.mods.push(inventory_component_mod);
         }
         lu_mod.components.push(first_id);
     }

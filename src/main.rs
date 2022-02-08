@@ -15,7 +15,10 @@ use crate::mod_context::LookupFile;
 use crate::mod_context::ModContext;
 use crate::mods::Mods;
 use assembly_fdb::{core::Field, mem::Database, store};
-use color_eyre::eyre::{self, eyre, WrapErr};
+use color_eyre::{
+    eyre::{self, eyre, WrapErr},
+    Section,
+};
 use mapr::Mmap;
 use rusqlite::{params_from_iter, Connection};
 use std::collections::HashMap;
@@ -116,6 +119,15 @@ fn main() -> eyre::Result<()> {
 
     let timer = print_timer(timer);
 
+    // Load lookup
+    let lookup_path = Path::new("lookup.json");
+    let lookup = read_or_create_json::<LookupFile>(lookup_path)
+        .wrap_err("Couldn't parse lookup.json")
+        .suggestion(
+            "Ensure that lookup.json hasn't been corrupted and contains valid JSON. If you don't need to preserve previously generated IDs, you can delete the file to start over.",
+        )?
+        .ids;
+
     // Set up ModContext
     let mut mod_context = ModContext::<'_> {
         root: std::env::current_dir()?,
@@ -125,7 +137,7 @@ fn main() -> eyre::Result<()> {
         ids: Default::default(),
         mods: Default::default(),
         server_sql: Default::default(),
-        lookup: Default::default(),
+        lookup,
     };
 
     // verify opts.input exists
@@ -174,6 +186,21 @@ fn main() -> eyre::Result<()> {
         }
     }
 
+    // Update the numbers generated above to account for IDs found in lookup.json
+    for already_generated_id in mod_context.lookup.keys() {
+        let referenced_mod = mod_context
+            .mods
+            .iter()
+            .find(|m| m.id == *already_generated_id);
+        if let Some(referenced_mod) = referenced_mod {
+            // Decrease counter for new IDs to generate
+            let target_table_name = referenced_mod.get_target_table_name();
+            new_ids_needed
+                .entry(target_table_name)
+                .and_modify(|v| *v -= 1);
+        }
+    }
+
     // Generate IDs
     let mut available_ids: HashMap<String, Vec<i32>> = new_ids_needed
         .iter()
@@ -194,7 +221,12 @@ fn main() -> eyre::Result<()> {
 
         for field in lu_mod.fields.iter_mut() {
             if let OutputValue::GenerateId = field {
-                if let Some(ids) = available_ids.get_mut(&table_name) {
+                // Check if ID is already in lookup.json
+                if let Some(id) = mod_context.lookup.get(&lu_mod.id) {
+                    *field = OutputValue::Known(Field::Integer(*id));
+                }
+                // Otherwise, take one of the generated ones
+                else if let Some(ids) = available_ids.get_mut(&table_name) {
                     let id = ids.pop().unwrap();
                     *field = OutputValue::Known(Field::Integer(id));
                     mod_context.lookup.insert(lu_mod.id.clone(), id);

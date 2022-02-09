@@ -73,16 +73,33 @@ struct Options {
 }
 
 fn main() -> eyre::Result<()> {
-    color_eyre::install()?;
+    color_eyre::config::HookBuilder::default()
+        .display_env_section(false)
+        .install()?;
     let opts = Options::from_args();
 
     let start_time = Instant::now();
 
-    println!("Input: {:?}", opts.input);
+    // verify opts.input exists
+    if !&opts.input.is_file() {
+        return Err(eyre!(
+            "Input configuration file {} does not exist",
+            opts.input.display()
+        ));
+    }
 
-    let configuration = read_or_create_json::<Mods>(&PathBuf::from(&opts.input))?;
+    println!("Using configuration file: {}", opts.input.display());
 
-    std::env::set_current_dir(opts.input.parent().unwrap())?;
+    let configuration = read_or_create_json::<Mods>(&PathBuf::from(&opts.input))
+        .wrap_err("Failed to read mods.json")
+        .suggestion(
+            "Ensure that mods.json hasn't been corrupted and contains valid JSON. \
+            You can delete the file to start over, but note that this will delete \
+            custom mod priorities if you configured those.",
+        )?;
+
+    // Default to current working dir if this fails
+    let _ = std::env::set_current_dir(opts.input.parent().unwrap());
 
     let timer = Instant::now();
 
@@ -92,15 +109,13 @@ fn main() -> eyre::Result<()> {
     let database_source_path = &configuration.database;
     let database_destination_path = "../res/cdclient.fdb";
     if !database_source_path.is_file() {
-        std::fs::copy(database_destination_path, database_source_path)?;
+        std::fs::copy(database_destination_path, database_source_path)
+            .wrap_err("Failed to copy cdclient.fdb to the mods folder.")
+            .suggestion("Make sure the original file exists at <client dir>/res/cdclient.fdb.")?;
     }
 
-    let src_file = File::open(&database_source_path).wrap_err_with(|| {
-        format!(
-            "Failed to open input file '{}'",
-            database_source_path.display()
-        )
-    })?;
+    let src_file = File::open(&database_source_path)
+        .wrap_err_with(|| format!("Failed to open FDB at '{}'", database_source_path.display()))?;
     let mmap = unsafe { Mmap::map(&src_file)? };
     let buffer: &[u8] = &mmap;
 
@@ -124,7 +139,9 @@ fn main() -> eyre::Result<()> {
     let lookup = read_or_create_json::<LookupFile>(lookup_path)
         .wrap_err("Couldn't parse lookup.json")
         .suggestion(
-            "Ensure that lookup.json hasn't been corrupted and contains valid JSON. If you don't need to preserve previously generated IDs, you can delete the file to start over.",
+            "Ensure that lookup.json hasn't been corrupted and contains valid JSON. \
+            If you don't need to preserve previously generated IDs, you can delete the \
+            file to start over.",
         )?
         .ids;
 
@@ -139,11 +156,6 @@ fn main() -> eyre::Result<()> {
         server_sql: Default::default(),
         lookup,
     };
-
-    // verify opts.input exists
-    if !&opts.input.is_file() {
-        return Err(eyre!("Input file does not exist"));
-    }
 
     // TODO check version
 
@@ -227,11 +239,21 @@ fn main() -> eyre::Result<()> {
                 }
                 // Otherwise, take one of the generated ones
                 else if let Some(ids) = available_ids.get_mut(&table_name) {
-                    let id = ids.pop().unwrap();
+                    let id = ids.pop().unwrap_or_else(|| {
+                        panic!(
+                            "No IDs left for table `{}`. This should never happen, \
+                            please report this as a bug.",
+                            table_name
+                        )
+                    });
                     *field = OutputValue::Known(Field::Integer(id));
                     mod_context.lookup.insert(lu_mod.id.clone(), id);
                 } else {
-                    return Err(eyre!("No available ids for table {}", table_name));
+                    return Err(eyre!(
+                        "A database ID for table `{}` was requested, but none were generated. \
+                        This should never happen, please report this as a bug.",
+                        table_name
+                    ));
                 }
             }
         }
@@ -244,7 +266,15 @@ fn main() -> eyre::Result<()> {
                 if let Some(id) = mod_context.lookup.get(id) {
                     *field = OutputValue::Known(Field::Integer(*id));
                 } else {
-                    return Err(eyre!("No id for {}", id));
+                    return Err(eyre!(
+                        "Mod {} references an object with ID {}, but no database ID was generated for this.",
+                        lu_mod.id,
+                        id
+                    ))
+                    .suggestion(format!(
+                        "Either remove the reference to {} from your mods, or add a mod with that as ID.",
+                        id
+                    ));
                 }
             }
         }

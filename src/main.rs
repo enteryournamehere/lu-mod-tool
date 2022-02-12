@@ -355,14 +355,7 @@ fn main() -> eyre::Result<()> {
             }
         };
 
-        let new_row_count = to_add.len() + src_table.row_iter().count();
-        let new_bucket_count = if new_row_count == 0 {
-            0
-        } else {
-            u32::next_power_of_two(new_row_count as u32)
-        };
-
-        let mut dest_table = store::Table::new(new_bucket_count as usize);
+        let mut dest_table = store::Table::new(src_table.bucket_count());
 
         let mut first = true;
         for src_column in src_table.column_iter() {
